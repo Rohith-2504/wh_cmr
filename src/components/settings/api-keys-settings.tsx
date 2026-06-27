@@ -53,12 +53,10 @@ interface ApiKey {
   created_at: string;
 }
 
+import { formatDateMedium } from '@/lib/dashboard/date-utils';
+
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  return formatDateMedium(iso);
 }
 
 function keyStatus(k: ApiKey): 'active' | 'revoked' | 'expired' {
@@ -73,21 +71,26 @@ export function ApiKeysSettings() {
 
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await fetch('/api/account/api-keys', { cache: 'no-store' });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to load API keys');
+        const message = payload.error || 'Failed to load API keys';
+        setLoadError(message);
+        toast.error(message);
         return;
       }
       const data = (await res.json()) as { keys: ApiKey[] };
       setKeys(data.keys);
     } catch (err) {
       console.error('[ApiKeysSettings] load error:', err);
+      setLoadError('Could not reach the server');
       toast.error('Could not reach the server');
     } finally {
       setLoading(false);
@@ -154,7 +157,15 @@ export function ApiKeysSettings() {
         }
       />
 
-      {keys.length === 0 ? (
+      {loadError ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            {loadError}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!loadError && keys.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-10 text-center">
             <KeyRound className="text-muted-foreground size-6" />
@@ -173,7 +184,9 @@ export function ApiKeysSettings() {
             )}
           </CardContent>
         </Card>
-      ) : (
+      ) : null}
+
+      {!loadError && keys.length > 0 ? (
         <Card>
           <CardContent className="p-0">
             <ul className="divide-border divide-y">
@@ -262,7 +275,7 @@ export function ApiKeysSettings() {
             </ul>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       <CreateKeyDialog
         open={createOpen}

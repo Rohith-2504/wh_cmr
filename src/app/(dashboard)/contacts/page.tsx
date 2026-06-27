@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import type { Contact, Tag, ContactTag } from '@/types';
@@ -37,6 +38,7 @@ import {
 import {
   Search,
   Plus,
+  Import,
   Upload,
   MoreHorizontal,
   Pencil,
@@ -48,10 +50,13 @@ import {
   SlidersHorizontal,
   Filter,
   X,
+  Workflow,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
 import { ImportModal } from '@/components/contacts/import-modal';
+import { exportContactsCsv } from '@/lib/contacts/export-contacts-csv';
+import { formatDateTime } from '@/lib/dashboard/date-utils';
 import { CustomFieldsManager } from '@/components/contacts/custom-fields-manager';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -63,7 +68,14 @@ interface ContactWithTags extends Contact {
   tags?: Tag[];
 }
 
+interface FlowOption {
+  id: string;
+  name: string;
+}
+
 export default function ContactsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
   const canEdit = useCan('send-messages');
   const canEditSettings = useCan('edit-settings');
@@ -75,14 +87,18 @@ export default function ContactsPage() {
   const [totalCount, setTotalCount] = useState(0);
   // Tag filter — contacts shown must have ANY of these tags (OR).
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  // Flow filter — contacts with a flow_run in ANY selected flow (OR).
+  const [selectedFlowIds, setSelectedFlowIds] = useState<string[]>([]);
 
   // Modals
-  const [formOpen, setFormOpen] = useState(false);
+  const wantsNewContact = searchParams.get('new') === '1';
+  const [formOpen, setFormOpen] = useState(wantsNewContact);
   const [editContact, setEditContact] = useState<Contact | null>(null);
   const [editContactTags, setEditContactTags] = useState<ContactTag[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailContactId, setDetailContactId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
@@ -94,6 +110,7 @@ export default function ContactsPage() {
 
   // All tags for display
   const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
+  const [flows, setFlows] = useState<FlowOption[]>([]);
 
   // Guards against out-of-order fetch responses: each fetchContacts run
   // claims a sequence number and only the latest is allowed to commit its
@@ -116,6 +133,18 @@ export default function ContactsPage() {
     }
   }, [supabase]);
 
+  const fetchFlows = useCallback(async () => {
+    const { data } = await supabase.from('flows').select('id, name').order('name');
+    if (data) {
+      setFlows(data);
+      setSelectedFlowIds((prev) => {
+        const ids = new Set(data.map((f) => f.id));
+        const pruned = prev.filter((id) => ids.has(id));
+        return pruned.length === prev.length ? prev : pruned;
+      });
+    }
+  }, [supabase]);
+
   const fetchContacts = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
@@ -131,18 +160,15 @@ export default function ContactsPage() {
     let contactRows: Contact[];
     let count: number;
 
-    if (selectedTagIds.length > 0) {
-      // Tag filter active — resolve it server-side (join + distinct +
-      // windowed total count + pagination) so a tag covering many
-      // contacts can't silently truncate the result or overflow an IN
-      // clause. See migration 025_filter_contacts_by_tags.
-      const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
-        p_tag_ids: selectedTagIds,
+    if (selectedTagIds.length > 0 || selectedFlowIds.length > 0) {
+      const { data, error } = await supabase.rpc('filter_contacts', {
+        p_tag_ids: selectedTagIds.length > 0 ? selectedTagIds : null,
+        p_flow_ids: selectedFlowIds.length > 0 ? selectedFlowIds : null,
         p_search: term || null,
         p_limit: PAGE_SIZE,
         p_offset: from,
       });
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+      if (seq !== fetchSeq.current) return;
       if (error) {
         toast.error('Failed to load contacts');
         setLoading(false);
@@ -164,7 +190,7 @@ export default function ContactsPage() {
       }
 
       const { data, count: exactCount, error } = await query;
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+      if (seq !== fetchSeq.current) return;
       if (error) {
         toast.error('Failed to load contacts');
         setLoading(false);
@@ -182,30 +208,35 @@ export default function ContactsPage() {
       return;
     }
 
-    // Fetch tags for these contacts
+    // Fetch tags for these contacts (join tags so display doesn't depend
+    // on tagsMap having loaded first).
     const contactIds = contactRows.map((c) => c.id);
     const { data: contactTags } = await supabase
       .from('contact_tags')
-      .select('contact_id, tag_id')
+      .select('contact_id, tag:tags(id, name, color)')
       .in('contact_id', contactIds);
-    if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+    if (seq !== fetchSeq.current) return;
 
-    const tagsByContact: Record<string, string[]> = {};
+    const tagsByContact: Record<string, Tag[]> = {};
     contactTags?.forEach((ct) => {
+      const raw = ct.tag as
+        | Pick<Tag, 'id' | 'name' | 'color'>
+        | Pick<Tag, 'id' | 'name' | 'color'>[]
+        | null;
+      const tagList = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      if (tagList.length === 0) return;
       if (!tagsByContact[ct.contact_id]) tagsByContact[ct.contact_id] = [];
-      tagsByContact[ct.contact_id].push(ct.tag_id);
+      tagsByContact[ct.contact_id].push(...(tagList as Tag[]));
     });
 
     const enriched: ContactWithTags[] = contactRows.map((c) => ({
       ...c,
-      tags: (tagsByContact[c.id] ?? [])
-        .map((tid) => tagsMap[tid])
-        .filter(Boolean),
+      tags: tagsByContact[c.id] ?? [],
     }));
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, selectedTagIds, tagsMap]);
+  }, [supabase, page, search, selectedTagIds, selectedFlowIds]);
 
   // Load-once-on-mount-ish data fetches. Each setter inside runs
   // inside an async promise completion (Supabase await), not
@@ -214,7 +245,9 @@ export default function ContactsPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTags();
-  }, [fetchTags]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchFlows();
+  }, [fetchTags, fetchFlows]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -226,6 +259,30 @@ export default function ContactsPage() {
     setEditContactTags([]);
     setFormOpen(true);
   }
+
+  // Strip `?new=1` after the add form opens so refresh/back don't re-trigger it.
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    router.replace('/contacts', { scroll: false });
+  }, [searchParams, router]);
+
+  // Deep-link from universal search: `/contacts?contact=<id>`
+  useEffect(() => {
+    const contactId = searchParams.get('contact');
+    if (!contactId) return;
+    setDetailContactId(contactId);
+    setDetailOpen(true);
+    router.replace('/contacts', { scroll: false });
+  }, [searchParams, router]);
+
+  // Deep-link search term: `/contacts?search=<term>`
+  useEffect(() => {
+    const term = searchParams.get('search');
+    if (!term) return;
+    setSearch(term);
+    setPage(0);
+    router.replace('/contacts', { scroll: false });
+  }, [searchParams, router]);
 
   async function openEditForm(contact: Contact) {
     const { data } = await supabase
@@ -321,7 +378,10 @@ export default function ContactsPage() {
   const allTags = Object.values(tagsMap).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-  const hasActiveFilters = search.trim().length > 0 || selectedTagIds.length > 0;
+  const hasActiveFilters =
+    search.trim().length > 0 ||
+    selectedTagIds.length > 0 ||
+    selectedFlowIds.length > 0;
 
   function toggleTagFilter(tagId: string) {
     setSelectedTagIds((prev) =>
@@ -335,6 +395,46 @@ export default function ContactsPage() {
   function clearTagFilters() {
     setSelectedTagIds([]);
     setPage(0);
+  }
+
+  function toggleFlowFilter(flowId: string) {
+    setSelectedFlowIds((prev) =>
+      prev.includes(flowId)
+        ? prev.filter((id) => id !== flowId)
+        : [...prev, flowId]
+    );
+    setPage(0);
+  }
+
+  function clearFlowFilters() {
+    setSelectedFlowIds([]);
+    setPage(0);
+  }
+
+  async function handleExport() {
+    if (totalCount === 0) {
+      toast.error(
+        hasActiveFilters
+          ? 'No contacts match your filters to export.'
+          : 'No contacts to export.',
+      );
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const count = await exportContactsCsv(supabase, {
+        search,
+        tagIds: selectedTagIds,
+        flowIds: selectedFlowIds,
+        tagsMap,
+      });
+      toast.success(`Exported ${count} contact${count === 1 ? '' : 's'}.`);
+    } catch {
+      toast.error('Failed to export contacts.');
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -365,9 +465,22 @@ export default function ContactsPage() {
             onClick={() => setImportOpen(true)}
             className="border-border text-muted-foreground hover:bg-muted"
           >
-            <Upload className="size-4" />
+            <Import className="size-4" />
             Import
           </GatedButton>
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={exporting || totalCount === 0}
+            className="border-border text-muted-foreground hover:bg-muted"
+          >
+            {exporting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Upload className="size-4" />
+            )}
+            Export
+          </Button>
           <GatedButton
             canAct={canEdit}
             gateReason="add or import contacts"
@@ -458,17 +571,70 @@ export default function ContactsPage() {
               )}
             </PopoverContent>
           </Popover>
+
+          {flows.length > 0 && (
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    className="border-border text-muted-foreground hover:bg-muted shrink-0"
+                  />
+                }
+              >
+                <Workflow className="size-4" />
+                Filter by flow
+                {selectedFlowIds.length > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                    {selectedFlowIds.length}
+                  </span>
+                )}
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-64 p-0">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+                  <span className="text-sm font-medium text-popover-foreground">
+                    Filter by flow
+                  </span>
+                  {selectedFlowIds.length > 0 && (
+                    <button
+                      onClick={clearFlowFilters}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {flows.map((flow) => (
+                    <label
+                      key={flow.id}
+                      className="flex items-center gap-2.5 px-3 py-1.5 cursor-pointer hover:bg-muted/50"
+                    >
+                      <Checkbox
+                        checked={selectedFlowIds.includes(flow.id)}
+                        onCheckedChange={() => toggleFlowFilter(flow.id)}
+                        aria-label={`Filter by ${flow.name}`}
+                      />
+                      <span className="text-sm text-popover-foreground truncate">
+                        {flow.name}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
 
-        {/* Active tag-filter chips */}
-        {selectedTagIds.length > 0 && (
+        {/* Active filter chips */}
+        {(selectedTagIds.length > 0 || selectedFlowIds.length > 0) && (
           <div className="flex flex-wrap items-center gap-1.5">
             {selectedTagIds.map((id) => {
               const tag = tagsMap[id];
               if (!tag) return null;
               return (
                 <span
-                  key={id}
+                  key={`tag-${id}`}
                   className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
                   style={{
                     backgroundColor: tag.color + '20',
@@ -486,8 +652,31 @@ export default function ContactsPage() {
                 </span>
               );
             })}
+            {selectedFlowIds.map((id) => {
+              const flow = flows.find((f) => f.id === id);
+              if (!flow) return null;
+              return (
+                <span
+                  key={`flow-${id}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground"
+                >
+                  <Workflow className="size-3 shrink-0 text-muted-foreground" />
+                  {flow.name}
+                  <button
+                    onClick={() => toggleFlowFilter(id)}
+                    aria-label={`Remove ${flow.name} filter`}
+                    className="hover:opacity-70"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              );
+            })}
             <button
-              onClick={clearTagFilters}
+              onClick={() => {
+                clearTagFilters();
+                clearFlowFilters();
+              }}
               className="text-xs text-muted-foreground hover:text-foreground px-1"
             >
               Clear all
@@ -546,13 +735,14 @@ export default function ContactsPage() {
               <TableHead className="text-muted-foreground hidden lg:table-cell">Company</TableHead>
               <TableHead className="text-muted-foreground hidden md:table-cell">Tags</TableHead>
               <TableHead className="text-muted-foreground hidden lg:table-cell">Created</TableHead>
+              <TableHead className="text-muted-foreground hidden lg:table-cell">Updated</TableHead>
               <TableHead className="text-muted-foreground w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center py-12">
+                <TableCell colSpan={9} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="size-6 animate-spin text-primary" />
                     <p className="text-sm text-muted-foreground">Loading contacts...</p>
@@ -561,7 +751,7 @@ export default function ContactsPage() {
               </TableRow>
             ) : contacts.length === 0 ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center py-12">
+                <TableCell colSpan={9} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="size-8 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">
@@ -634,12 +824,11 @@ export default function ContactsPage() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">
-                    {new Date(contact.created_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
+                  <TableCell className="text-muted-foreground text-xs hidden lg:table-cell whitespace-nowrap">
+                    {formatDateTime(contact.created_at)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs hidden lg:table-cell whitespace-nowrap">
+                    {formatDateTime(contact.updated_at)}
                   </TableCell>
                   <TableCell>
                     <DropdownMenu>
@@ -739,7 +928,7 @@ export default function ContactsPage() {
         }}
       />
 
-      {/* Contact Detail Sheet */}
+      {/* Contact Detail Modal */}
       <ContactDetailView
         open={detailOpen}
         onOpenChange={setDetailOpen}

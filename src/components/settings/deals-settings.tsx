@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Coins, Loader2 } from "lucide-react";
+import { Coins, Loader2, CircleAlert } from "lucide-react";
 
-import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { migrationRequiredMessage } from "@/lib/auth/migration-errors";
 import { CURRENCIES } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -28,12 +28,12 @@ import { SettingsPanelHead } from "./settings-panel-head";
  * admins+, so non-admins see a disabled, read-only control.
  */
 export function DealsSettings() {
-  const supabase = createClient();
   const {
     accountId,
     defaultCurrency,
     canEditSettings,
     profileLoading,
+    legacyAccountSharing,
     refreshProfile,
   } = useAuth();
 
@@ -51,20 +51,28 @@ export function DealsSettings() {
   async function handleSave() {
     if (!accountId || !dirty) return;
     setSaving(true);
-    const { error } = await supabase
-      .from("accounts")
-      .update({ default_currency: selected })
-      .eq("id", accountId);
-    if (error) {
-      toast.error("Failed to save default currency");
+    try {
+      const res = await fetch("/api/account", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ default_currency: selected }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(payload.error || "Failed to save default currency");
+        return;
+      }
+      // Pull the new value back into the auth context so the deal form
+      // and every total pick it up without a full reload.
+      await refreshProfile();
+      toast.success("Default currency updated");
+    } catch {
+      toast.error("Could not reach the server. Try again?");
+    } finally {
       setSaving(false);
-      return;
     }
-    // Pull the new value back into the auth context so the deal form
-    // and every total pick it up without a full reload.
-    await refreshProfile();
-    setSaving(false);
-    toast.success("Default currency updated");
   }
 
   return (
@@ -86,12 +94,23 @@ export function DealsSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {legacyAccountSharing ? (
+            <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                {migrationRequiredMessage(
+                  "Account-wide currency",
+                  "supabase/migrations/017_account_sharing.sql and 021_account_default_currency.sql",
+                )}
+              </span>
+            </p>
+          ) : null}
           <div className="grid gap-2 sm:max-w-xs">
             <Label className="text-muted-foreground">Currency</Label>
             <select
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
-              disabled={!canEditSettings || profileLoading}
+              disabled={!canEditSettings || profileLoading || legacyAccountSharing}
               className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
               {CURRENCIES.map((c) => (
@@ -107,7 +126,7 @@ export function DealsSettings() {
             )}
           </div>
 
-          {canEditSettings && (
+          {canEditSettings && !legacyAccountSharing && (
             <Button
               onClick={handleSave}
               disabled={saving || !dirty}

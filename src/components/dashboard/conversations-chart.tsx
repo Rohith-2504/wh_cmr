@@ -6,6 +6,7 @@ import type { ConversationsSeriesPoint } from '@/lib/dashboard/types'
 import { EmptyState } from './empty-state'
 import { Skeleton } from './skeleton'
 import { cn } from '@/lib/utils'
+import { formatChartDayLong, formatChartDayShort } from '@/lib/dashboard/date-utils'
 
 type RangeDays = 7 | 30 | 90
 
@@ -17,20 +18,17 @@ interface ConversationsChartProps {
   onRangeChange: (r: RangeDays) => void
 }
 
-// ------------------------------------------------------------
-// Layout constants. The SVG renders into a fixed viewBox and scales
-// via CSS (preserveAspectRatio default). Everything inside uses
-// viewBox coordinates so the drawing math stays simple even as the
-// container resizes.
-// ------------------------------------------------------------
 const VB_W = 760
-const VB_H = 240
-const PADDING = { top: 16, right: 16, bottom: 28, left: 40 }
+const VB_H = 280
+const PADDING = { top: 36, right: 20, bottom: 32, left: 44 }
+
+/** Reference palette — blue + amber area chart (uploaded design). */
+const INCOMING = { line: '#4F8EF7', fill: '#4F8EF7' }
+const OUTGOING = { line: '#F5A623', fill: '#F5A623' }
 
 export function ConversationsChart({ series, loading, range, onRangeChange }: ConversationsChartProps) {
   const data = series[range]
 
-  // Memoise the max so per-day hover math doesn't recompute it.
   const { maxY, niceTicks } = useMemo(() => {
     const arr = data ?? []
     const max = arr.reduce(
@@ -41,12 +39,11 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
     const ticks = [0, ceil / 4, ceil / 2, (3 * ceil) / 4, ceil].map((v) =>
       Math.round(v),
     )
-    // De-dupe when the series is flat 0.
     return { maxY: ceil, niceTicks: Array.from(new Set(ticks)) }
   }, [data])
 
   return (
-    <section className="flex h-full flex-col rounded-xl border border-border bg-card">
+    <section className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-card">
       <header className="flex items-center justify-between border-b border-border px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Conversations Over Time</h2>
@@ -71,9 +68,9 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
         </div>
       </header>
 
-      <div className="p-5">
+      <div className="flex min-h-0 flex-1 flex-col p-4">
         {loading || !data ? (
-          <Skeleton className="h-[240px] w-full" />
+          <Skeleton className="flex-1 w-full rounded-xl" />
         ) : data.every((p) => p.incoming === 0 && p.outgoing === 0) ? (
           <EmptyState
             icon={MessageSquare}
@@ -81,23 +78,14 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
             hint="Send or receive messages to start populating this chart."
           />
         ) : (
-          <LineSvg data={data} maxY={maxY} ticks={niceTicks} />
+          <AreaChartSvg data={data} maxY={maxY} ticks={niceTicks} />
         )}
       </div>
-
-      <footer className="flex items-center gap-4 border-t border-border px-5 py-3 text-xs text-muted-foreground">
-        <LegendDot color="#3b82f6" label="Incoming" />
-        <LegendDot color="#7c3aed" label="Outgoing" />
-      </footer>
     </section>
   )
 }
 
-// ------------------------------------------------------------
-// The actual SVG. Two polylines + per-day hit targets for hover.
-// ------------------------------------------------------------
-
-function LineSvg({
+function AreaChartSvg({
   data,
   maxY,
   ticks,
@@ -106,41 +94,37 @@ function LineSvg({
   maxY: number
   ticks: number[]
 }) {
-  // Hover state: both the snapped index AND the tooltip's pixel
-  // offset inside the wrapper div. They're stored together so the
-  // tooltip positions against the chart's actual rendered pixels,
-  // not against a raw viewBox percentage. See the precision note on
-  // the onMove handler below.
-  const [hover, setHover] = useState<{ idx: number; tooltipLeftPx: number } | null>(null)
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-  const wrapRef = useRef<HTMLDivElement>(null)
 
   const chartW = VB_W - PADDING.left - PADDING.right
   const chartH = VB_H - PADDING.top - PADDING.bottom
+  const baselineY = PADDING.top + chartH
 
-  // x step can be fractional for 90-day views; points are positioned
-  // at the center of each "slot" so the first and last points don't
-  // sit right on the axis.
   const stepX = data.length > 1 ? chartW / (data.length - 1) : 0
   const yFor = (v: number) =>
-    maxY === 0 ? PADDING.top + chartH : PADDING.top + chartH - (v / maxY) * chartH
+    maxY === 0 ? baselineY : PADDING.top + chartH - (v / maxY) * chartH
   const xFor = (i: number) => PADDING.left + i * stepX
 
-  const incomingPath = data.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i)},${yFor(p.incoming)}`).join(' ')
-  const outgoingPath = data.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i)},${yFor(p.outgoing)}`).join(' ')
+  const incomingPoints = useMemo(
+    () => data.map((p, i) => ({ x: xFor(i), y: yFor(p.incoming) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, maxY, stepX],
+  )
+  const outgoingPoints = useMemo(
+    () => data.map((p, i) => ({ x: xFor(i), y: yFor(p.outgoing) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, maxY, stepX],
+  )
 
-  // Mouse-move: use the SVG's current screen-CTM to map clientX
-  // back to viewBox coordinates. The previous rect-based math
-  // assumed the viewBox filled the SVG DOM box linearly, but
-  // `preserveAspectRatio="xMidYMid meet"` (the SVG default)
-  // letterboxes the content horizontally when the container is
-  // wider than the viewBox aspect — so hover snapped hundreds of
-  // pixels off on wide layouts. CTM-inverse correctly accounts for
-  // letterboxing, scaling, and any future transform changes.
+  const incomingLine = buildSmoothPath(incomingPoints)
+  const outgoingLine = buildSmoothPath(outgoingPoints)
+  const incomingArea = buildAreaPath(incomingLine, incomingPoints, baselineY)
+  const outgoingArea = buildAreaPath(outgoingLine, outgoingPoints, baselineY)
+
   useEffect(() => {
     const svg = svgRef.current
-    const wrap = wrapRef.current
-    if (!svg || !wrap) return
+    if (!svg) return
     const onMove = (e: MouseEvent) => {
       const ctm = svg.getScreenCTM()
       if (!ctm) return
@@ -150,7 +134,7 @@ function LineSvg({
       const local = pt.matrixTransform(ctm.inverse())
       const xVb = local.x
       if (xVb < PADDING.left - 8 || xVb > VB_W - PADDING.right + 8) {
-        setHover(null)
+        setHoverIdx(null)
         return
       }
       const relative = xVb - PADDING.left
@@ -158,46 +142,69 @@ function LineSvg({
         0,
         Math.min(data.length - 1, Math.round(stepX === 0 ? 0 : relative / stepX)),
       )
-      // Map the snapped data-point's viewBox x back to screen, then
-      // subtract the wrapper's left edge — that pixel offset is what
-      // the absolutely-positioned tooltip div consumes. `xFor` is
-      // inlined here so the effect deps stay stable (it's a closure
-      // that'd otherwise be a new reference every render).
-      const dataPointVbX = PADDING.left + idx * stepX
-      const dataPointPt = svg.createSVGPoint()
-      dataPointPt.x = dataPointVbX
-      dataPointPt.y = 0
-      const screen = dataPointPt.matrixTransform(ctm)
-      const wrapRect = wrap.getBoundingClientRect()
-      setHover({ idx, tooltipLeftPx: screen.x - wrapRect.left })
+      setHoverIdx(idx)
     }
-    const onLeave = () => setHover(null)
+    const onLeave = () => setHoverIdx(null)
     svg.addEventListener('mousemove', onMove)
     svg.addEventListener('mouseleave', onLeave)
     return () => {
       svg.removeEventListener('mousemove', onMove)
       svg.removeEventListener('mouseleave', onLeave)
     }
-    // xFor + yFor close over stepX, so stepX covers them.
   }, [data, stepX])
 
-  const hovered = hover !== null ? data[hover.idx] : null
-  const hoverX = hover !== null ? xFor(hover.idx) : 0
-
-  // X-axis label strategy: show ~6 evenly-spaced labels regardless
-  // of range so the axis never looks crowded.
+  const hovered = hoverIdx !== null ? data[hoverIdx] : null
+  const hoverX = hoverIdx !== null ? xFor(hoverIdx) : 0
   const labelStride = Math.max(1, Math.ceil(data.length / 6))
 
   return (
-    <div ref={wrapRef} className="relative w-full">
+    <div className="relative flex min-h-0 flex-1 w-full overflow-hidden rounded-xl bg-[#121820]">
+      {/* In-chart legend — top left (reference design) */}
+      <div className="pointer-events-none absolute left-4 top-3 z-10 flex items-center gap-4 text-[11px] text-[#9CA3AF]">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: INCOMING.line }} />
+          Incoming
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: OUTGOING.line }} />
+          Outgoing
+        </span>
+      </div>
+
+      {/* Hover summary — top right (reference design) */}
+      {hovered && hoverIdx !== null && (
+        <div className="pointer-events-none absolute right-4 top-3 z-10 text-right">
+          <p className="text-[10px] text-[#6B7280]">{longDayLabel(hovered.day)}</p>
+          <p className="text-lg font-semibold leading-tight" style={{ color: INCOMING.line }}>
+            {hovered.incoming.toLocaleString()}
+            <span className="ml-1 text-[11px] font-normal text-[#9CA3AF]">incoming</span>
+          </p>
+          <p className="text-lg font-semibold leading-tight" style={{ color: OUTGOING.line }}>
+            {hovered.outgoing.toLocaleString()}
+            <span className="ml-1 text-[11px] font-normal text-[#9CA3AF]">outgoing</span>
+          </p>
+        </div>
+      )}
+
       <svg
         ref={svgRef}
         viewBox={`0 0 ${VB_W} ${VB_H}`}
-        className="h-[240px] w-full"
+        className="h-full min-h-[200px] w-full"
         role="img"
         aria-label="Conversations per day"
       >
-        {/* Y-axis gridlines + labels */}
+        <defs>
+          <linearGradient id="incomingAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={INCOMING.fill} stopOpacity="0.45" />
+            <stop offset="100%" stopColor={INCOMING.fill} stopOpacity="0.02" />
+          </linearGradient>
+          <linearGradient id="outgoingAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={OUTGOING.fill} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={OUTGOING.fill} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+
+        {/* Subtle horizontal guides */}
         {ticks.map((t) => {
           const y = yFor(t)
           return (
@@ -207,15 +214,16 @@ function LineSvg({
                 x2={VB_W - PADDING.right}
                 y1={y}
                 y2={y}
-                stroke="var(--border)"
-                strokeDasharray="3 3"
+                stroke="#2A3441"
+                strokeWidth={1}
               />
               <text
-                x={PADDING.left - 8}
+                x={PADDING.left - 10}
                 y={y}
                 textAnchor="end"
                 dominantBaseline="middle"
-                className="fill-muted-foreground text-[10px]"
+                fill="#6B7280"
+                fontSize={10}
               >
                 {t}
               </text>
@@ -223,111 +231,120 @@ function LineSvg({
           )
         })}
 
+        {/* Area fills — draw outgoing first so incoming stacks on top when overlapping */}
+        <path d={outgoingArea} fill="url(#outgoingAreaGrad)" />
+        <path d={incomingArea} fill="url(#incomingAreaGrad)" />
+
+        {/* Smooth lines */}
+        <path
+          d={outgoingLine}
+          fill="none"
+          stroke={OUTGOING.line}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d={incomingLine}
+          fill="none"
+          stroke={INCOMING.line}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+
         {/* X-axis labels */}
         {data.map((p, i) =>
           i % labelStride === 0 ? (
             <text
               key={p.day}
               x={xFor(i)}
-              y={VB_H - 8}
+              y={VB_H - 10}
               textAnchor="middle"
-              className="fill-muted-foreground text-[10px]"
+              fill="#6B7280"
+              fontSize={10}
             >
               {shortDayLabel(p.day)}
             </text>
           ) : null,
         )}
 
-        {/* Outgoing polyline (violet) */}
-        <path
-          d={outgoingPath}
-          fill="none"
-          stroke="#7c3aed"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        {/* Incoming polyline (blue) */}
-        <path
-          d={incomingPath}
-          fill="none"
-          stroke="#3b82f6"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* Hover crosshair */}
-        {hover !== null && (
+        {/* Hover indicator */}
+        {hoverIdx !== null && (
           <g pointerEvents="none">
             <line
               x1={hoverX}
               x2={hoverX}
               y1={PADDING.top}
-              y2={PADDING.top + chartH}
-              stroke="var(--muted-foreground)"
-              strokeDasharray="3 3"
+              y2={baselineY}
+              stroke={INCOMING.line}
+              strokeWidth={1.5}
+              opacity={0.85}
             />
-            <circle cx={hoverX} cy={yFor(data[hover.idx].incoming)} r={3.5} fill="#3b82f6" />
-            <circle cx={hoverX} cy={yFor(data[hover.idx].outgoing)} r={3.5} fill="#7c3aed" />
+            <circle
+              cx={hoverX}
+              cy={yFor(data[hoverIdx].incoming)}
+              r={5}
+              fill="#fff"
+              stroke={INCOMING.line}
+              strokeWidth={2}
+            />
+            <circle
+              cx={hoverX}
+              cy={yFor(data[hoverIdx].outgoing)}
+              r={5}
+              fill="#fff"
+              stroke={OUTGOING.line}
+              strokeWidth={2}
+            />
           </g>
         )}
       </svg>
-
-      {/* Tooltip — absolute-positioned div so we get crisp text, not
-          SVG-rendered text. The left offset comes from the CTM-based
-          mapping so it lines up with the actual crosshair pixel, not a
-          letterboxed viewBox percentage. */}
-      {hovered && hover !== null && (
-        <div
-          className="pointer-events-none absolute top-0 z-10 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-[11px] shadow-lg"
-          style={{ left: `${hover.tooltipLeftPx}px` }}
-        >
-          <div className="font-medium text-popover-foreground">{longDayLabel(hovered.day)}</div>
-          <div className="mt-1 flex flex-col gap-0.5">
-            <span className="flex items-center gap-1.5 text-blue-300">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
-              {hovered.incoming} incoming
-            </span>
-            <span className="flex items-center gap-1.5 text-primary">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-              {hovered.outgoing} outgoing
-            </span>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
-function LegendDot({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-      {label}
-    </span>
-  )
+/** Monotone cubic spline through points (smooth area-chart curves). */
+function buildSmoothPath(points: Array<{ x: number; y: number }>): string {
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0].x},${points[0].y}`
+
+  let d = `M ${points[0].x},${points[0].y}`
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[Math.min(points.length - 1, i + 2)]
+
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`
+  }
+  return d
+}
+
+function buildAreaPath(
+  linePath: string,
+  points: Array<{ x: number; y: number }>,
+  baselineY: number,
+): string {
+  if (!linePath || points.length === 0) return ''
+  const first = points[0]
+  const last = points[points.length - 1]
+  return `${linePath} L ${last.x},${baselineY} L ${first.x},${baselineY} Z`
 }
 
 function shortDayLabel(key: string): string {
-  // key is YYYY-MM-DD; return "Apr 17"-style. Using Date with an
-  // appended time avoids timezone-shift surprises across midnight.
-  const [y, m, d] = key.split('-').map(Number)
-  const date = new Date(y, m - 1, d)
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return formatChartDayShort(key)
 }
 
 function longDayLabel(key: string): string {
-  const [y, m, d] = key.split('-').map(Number)
-  const date = new Date(y, m - 1, d)
-  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  return formatChartDayLong(key)
 }
 
-/**
- * Round `max` up to a "nice" number so Y-axis ticks feel natural
- * (1, 2, 5, 10, 20, 50, …). Keeps the chart readable even when the
- * series is small (max=3 becomes ceil=4, not 3).
- */
 function niceCeil(max: number): number {
   if (max <= 0) return 4
   const pow = Math.pow(10, Math.floor(Math.log10(max)))

@@ -1,4 +1,5 @@
 import type { AutomationTriggerType } from '@/types'
+import { formatDateMedium } from '@/lib/dashboard/date-utils'
 
 export interface TriggerMeta {
   label: string
@@ -55,5 +56,5 @@ export function formatRelative(iso: string | null | undefined): string {
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
   if (diffSec < 2_592_000) return `${Math.floor(diffSec / 86400)}d ago`
-  return new Date(iso).toLocaleDateString()
+  return formatDateMedium(iso)
 }

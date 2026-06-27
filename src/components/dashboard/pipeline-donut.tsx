@@ -15,7 +15,7 @@ interface PipelineDonutProps {
 
 export function PipelineDonut({ data, loading, currency }: PipelineDonutProps) {
   return (
-    <section className="flex h-full flex-col rounded-xl border border-border bg-card">
+    <section className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-card">
       <header className="border-b border-border px-5 py-4">
         <h2 className="text-sm font-semibold text-foreground">Pipeline Value</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
@@ -23,9 +23,9 @@ export function PipelineDonut({ data, loading, currency }: PipelineDonutProps) {
         </p>
       </header>
 
-      <div className="flex flex-1 flex-col p-5">
+      <div className="flex min-h-0 flex-1 flex-col p-5">
         {loading || !data ? (
-          <Skeleton className="h-56 w-full" />
+          <Skeleton className="min-h-0 flex-1 w-full" />
         ) : data.stages.length === 0 ? (
           <EmptyState
             icon={GitBranch}
@@ -34,8 +34,10 @@ export function PipelineDonut({ data, loading, currency }: PipelineDonutProps) {
           />
         ) : (
           <>
-            <Donut data={data} currency={currency} />
-            <ul className="mt-5 space-y-2">
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <Donut data={data} currency={currency} />
+            </div>
+            <ul className="mt-5 shrink-0 space-y-2">
               {data.stages.map((s) => (
                 <li key={s.id} className="flex items-center gap-3 text-xs">
                   <span
@@ -95,8 +97,12 @@ function Donut({ data, currency }: { data: PipelineDonutData; currency: string }
   })
 
   return (
-    <div className="flex items-center justify-center">
-      <svg viewBox={`0 0 ${size} ${size}`} className="h-48 w-48" role="img" aria-label="Pipeline value by stage">
+    <svg
+      viewBox={`0 0 ${size} ${size}`}
+      className="aspect-square h-full max-h-full w-full max-w-full"
+      role="img"
+      aria-label="Pipeline value by stage"
+    >
         {/* background ring */}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--muted)" strokeWidth={ringWidth} />
         {segments.map((seg) => (
@@ -126,8 +132,7 @@ function Donut({ data, currency }: { data: PipelineDonutData; currency: string }
         >
           {formatCurrencyShort(data.totalValue, currency)}
         </text>
-      </svg>
-    </div>
+    </svg>
   )
 }
 

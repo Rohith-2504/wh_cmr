@@ -8,7 +8,6 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
-import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -537,6 +536,53 @@ export default function InboxPage() {
     [activeConversation]
   );
 
+  const [contactTagUpdate, setContactTagUpdate] = useState<{
+    contactId: string;
+    tagIds: string[];
+  } | null>(null);
+
+  const handleContactTagsChange = useCallback(
+    (contactId: string, tagIds: string[]) => {
+      setContactTagUpdate({ contactId, tagIds });
+    },
+    [],
+  );
+
+  const handleConversationDeleted = useCallback(
+    (conversationId: string) => {
+      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(null);
+        setActiveContact(null);
+        setMessages([]);
+        autoSelectedForDeepLinkRef.current = null;
+        router.replace("/inbox", { scroll: false });
+      }
+    },
+    [activeConversation?.id, router],
+  );
+
+  const handleChatCleared = useCallback(
+    (conversationId: string) => {
+      const clearedPreview = {
+        last_message_text: undefined,
+        last_message_at: undefined,
+        unread_count: 0,
+      };
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId ? { ...c, ...clearedPreview } : c,
+        ),
+      );
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation((prev) =>
+          prev ? { ...prev, ...clearedPreview } : prev,
+        );
+      }
+    },
+    [activeConversation?.id],
+  );
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops
@@ -545,25 +591,35 @@ export default function InboxPage() {
   const hasActiveConv = !!activeConversation;
 
   return (
-    <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
-      {/* WhatsApp connection banner — in the flex column, not absolute,
-          so it pushes the panels down instead of overlapping them. */}
+    <div className="inbox-wa flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+      {/* WhatsApp connection banner */}
       {whatsappConnected === false && (
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
-          <WifiOff className="h-4 w-4 text-amber-400" />
-          <p className="text-xs text-amber-400">
-            WhatsApp® is not connected. Go to Settings to connect your account.
+        <div className="wa-banner flex shrink-0 items-center justify-center gap-2 border-b px-4 py-2">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <p className="text-xs">
+            WhatsApp is not connected.{" "}
+            <button
+              type="button"
+              onClick={() => router.push("/settings?tab=whatsapp")}
+              className="font-medium text-[var(--wa-green)] underline-offset-2 hover:underline"
+            >
+              Go to Settings
+            </button>{" "}
+            to connect your account.
           </p>
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex w-full flex-1 overflow-hidden">
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
         <div
           className={cn(
-            "flex h-full flex-1 lg:flex-none",
+            // Width lives on this column wrapper only — putting lg:w-[30%]
+            // on ConversationList as well made the inner panel 30% of 30%,
+            // leaving a grey strip of --wa-bg between list and thread.
+            "flex h-full w-full min-w-0 flex-1 flex-col lg:w-[30%] lg:min-w-[340px] lg:max-w-[440px] lg:shrink-0 lg:flex-none",
             hasActiveConv ? "hidden lg:flex" : "flex",
           )}
         >
@@ -573,6 +629,8 @@ export default function InboxPage() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            onRefresh={handleManualRefresh}
+            contactTagUpdate={contactTagUpdate}
           />
         </div>
 
@@ -588,7 +646,7 @@ export default function InboxPage() {
             on the right. Issue #165. */}
         <div
           className={cn(
-            "flex h-full min-w-0 flex-1 lg:flex",
+            "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden lg:flex",
             hasActiveConv ? "flex" : "hidden lg:flex",
           )}
         >
@@ -601,6 +659,9 @@ export default function InboxPage() {
             onUpdateMessage={handleUpdateMessage}
             onStatusChange={handleStatusChange}
             onAssignChange={handleAssignChange}
+            onContactTagsChange={handleContactTagsChange}
+            onConversationDeleted={handleConversationDeleted}
+            onChatCleared={handleChatCleared}
             onBack={handleCloseConversation}
             resyncToken={resyncToken}
             onRefresh={handleManualRefresh}

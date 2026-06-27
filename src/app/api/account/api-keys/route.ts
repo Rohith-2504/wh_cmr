@@ -24,6 +24,7 @@ import {
   requireRole,
   toErrorResponse,
 } from '@/lib/auth/account';
+import { schemaMigrationHint } from '@/lib/auth/migration-errors';
 import { generateApiKey } from '@/lib/api-keys/keys';
 import { normalizeScopes } from '@/lib/api-keys/scopes';
 import {
@@ -56,9 +57,14 @@ export async function GET() {
 
     if (error) {
       console.error('[GET /api/account/api-keys] fetch error:', error);
+      const hint = schemaMigrationHint(
+        error,
+        'API keys',
+        'supabase/migrations/026_api_keys.sql',
+      );
       return NextResponse.json(
-        { error: 'Failed to load API keys' },
-        { status: 500 }
+        { error: hint ?? 'Failed to load API keys' },
+        { status: hint ? 503 : 500 },
       );
     }
 

@@ -52,6 +52,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createClient } from '@/lib/supabase/client';
+import { formatDateMedium } from '@/lib/dashboard/date-utils';
 
 interface PeekOk {
   ok: true;
@@ -307,11 +308,7 @@ export default function JoinPage() {
           {ROLE_LABEL[peek.role]}
         </span>
         . Link valid until{' '}
-        {new Date(peek.expires_at).toLocaleDateString(undefined, {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        })}
+        {formatDateMedium(peek.expires_at)}
         .
       </CardDescription>
     </CardHeader>

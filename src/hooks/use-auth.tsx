@@ -10,13 +10,19 @@ import {
   type ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { User } from "@supabase/supabase-js";
+import type { PostgrestError, User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
+import {
+  isMissingColumnError,
+  isMissingSchemaResourceError,
+  normalizeProfileRow,
+  PROFILE_SELECT_LEGACY,
+  PROFILE_SELECT_WITH_ACCOUNT,
+} from "@/lib/auth/profile-load";
 import {
   canEditSettings as canEditSettingsFor,
   canManageMembers as canManageMembersFor,
   canSendMessages as canSendMessagesFor,
-  isAccountRole,
   type AccountRole,
 } from "@/lib/auth/roles";
 
@@ -47,166 +53,153 @@ interface AccountSummary {
 interface AuthContextValue {
   user: User | null;
   profile: Profile | null;
-  /**
-   * Session-level loading. Flips to false as soon as we know whether
-   * a user is signed in, *without* waiting for the profile row. Use
-   * this for chrome (sidebar / header) that can render with just the
-   * user object.
-   */
   loading: boolean;
-  /**
-   * Profile-row loading. Stays true until `fetchProfile` settles
-   * (success, missing row, or error). Code that branches on
-   * `profile.beta_features` MUST gate on this — otherwise it sees the
-   * `{ loading: false, profile: null }` window during initial load
-   * and may take the "not opted in" branch incorrectly.
-   */
   profileLoading: boolean;
   signOut: () => Promise<void>;
-  /** Re-fetch the current user's profile row — call after a save from
-   *  the settings form so header/sidebar reflect the change without a
-   *  full page reload. */
   refreshProfile: () => Promise<void>;
-
-  // ----------------------------------------------------------
-  // Account-scoped context (added by the account-sharing series)
-  //
-  // All of these are nullable until `profileLoading` is false.
-  // After the profile resolves they're guaranteed to be set,
-  // because migration 017 made `account_id` / `account_role`
-  // NOT NULL on `profiles`.
-  // ----------------------------------------------------------
-
-  /** Account id the current user belongs to. Null while loading. */
   accountId: string | null;
-  /** Role within that account. Null while loading. */
   accountRole: AccountRole | null;
-  /** Lightweight account meta — id + name + default_currency. Null while loading. */
   account: AccountSummary | null;
-  /** Account default deal currency. Falls back to DEFAULT_CURRENCY
-   *  while loading or when no account is resolved, so callers can use
-   *  it unconditionally. */
+  /** True when profiles.account_id is absent (pre migration 017). */
+  legacyAccountSharing: boolean;
   defaultCurrency: string;
-  /** True if `accountRole === 'owner'`. */
   isOwner: boolean;
-  /** True if `accountRole === 'admin'` (does NOT include owner — use canManageMembers for "admin or above"). */
   isAdmin: boolean;
-  /** True if `accountRole === 'agent'`. */
   isAgent: boolean;
-  /** True if `accountRole === 'viewer'`. */
   isViewer: boolean;
-  /** True if the caller can manage members (admin+). */
   canManageMembers: boolean;
-  /** True if the caller can edit account-wide settings (admin+). */
   canEditSettings: boolean;
-  /** True if the caller can send messages and edit operational data (agent+). */
   canSendMessages: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function isMeaningfulPostgrestError(
+  error: PostgrestError | null | undefined,
+): error is PostgrestError {
+  return !!error && !!(error.message || error.code);
+}
+
+function logSupabaseError(context: string, error: unknown): void {
+  if (error && typeof error === "object") {
+    const pg = error as PostgrestError;
+    if (isMissingSchemaResourceError(pg)) {
+      console.warn(context, {
+        message: pg.message,
+        details: pg.details,
+        hint: pg.hint,
+        code: pg.code,
+      });
+      return;
+    }
+    if (pg.message || pg.code) {
+      console.error(context, {
+        message: pg.message,
+        details: pg.details,
+        hint: pg.hint,
+        code: pg.code,
+      });
+      return;
+    }
+  }
+  console.error(context, error);
+}
+
 /**
  * AuthProvider — wrap this around the dashboard layout.
- * Makes ONE getSession() call for the whole tree instead of one per
+ * Makes ONE getUser() call for the whole tree instead of one per
  * component, avoiding internal lock contention in the Supabase client.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [legacyAccountSharing, setLegacyAccountSharing] = useState(false);
   const [loading, setLoading] = useState(true);
-  // Tracked separately from `loading`. The session settles fast (one
-  // local cookie read); the profile fetch crosses the network and
-  // settles later. Callers that gate on `profile.*` need to know which
-  // window they're in — see the type doc above.
   const [profileLoading, setProfileLoading] = useState(true);
 
-  // Shared across init, auth-state-change listener, and the exposed
-  // refreshProfile() callback. Reads the current session's user id and
-  // pulls the matching profile row along with its account summary.
   const fetchProfile = useCallback(async (userId: string) => {
     const supabase = createClient();
     setProfileLoading(true);
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("profiles")
-        .select(
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role",
-        )
+        .select(PROFILE_SELECT_WITH_ACCOUNT)
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (error) {
-        console.error("[AuthProvider] fetchProfile error:", {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code,
-        });
+      let legacy = false;
+      if (error && isMissingColumnError(error)) {
+        console.warn(
+          "[AuthProvider] fetchProfile: extended profile columns missing, falling back to legacy select",
+        );
+        ({ data, error } = await supabase
+          .from("profiles")
+          .select(PROFILE_SELECT_LEGACY)
+          .eq("user_id", userId)
+          .maybeSingle());
+        legacy = true;
+      }
+
+      if (isMeaningfulPostgrestError(error)) {
+        logSupabaseError("[AuthProvider] fetchProfile error:", error);
+        setProfile(null);
+        setAccount(null);
+        setLegacyAccountSharing(false);
         return;
       }
 
-      if (data) {
-        // Load the account with a plain lookup by id instead of an
-        // embedded FK join. The embed (`account:accounts!inner(...)`)
-        // forces PostgREST to resolve the profiles.account_id →
-        // accounts.id relationship from its schema cache; a stale cache
-        // (common right after a migration adds the FK) makes it fail
-        // hard with PGRST200 and blanks the whole profile — the user
-        // then loses account context everywhere (issue #294). A point
-        // lookup by id needs no relationship inference, so the profile
-        // (with account_id / account_role) still resolves even if the
-        // account name lookup itself can't.
-        let accountRow: AccountSummary | null = null;
-        if (data.account_id) {
-          const { data: account, error: accountErr } = await supabase
-            .from("accounts")
-            // default_currency added in migration 021; narrowed to the
-            // USD fallback below for older schemas where it reads null.
-            .select("id, name, default_currency")
-            .eq("id", data.account_id)
-            .maybeSingle();
-          if (accountErr) {
-            console.error("[AuthProvider] fetchAccount error:", {
-              message: accountErr.message,
-              details: accountErr.details,
-              hint: accountErr.hint,
-              code: accountErr.code,
-            });
-          } else if (account) {
-            accountRow = {
-              id: account.id,
-              name: account.name,
-              default_currency: account.default_currency ?? DEFAULT_CURRENCY,
-            };
-          }
-        }
-
-        // Narrow the DB enum into our AccountRole union. The DB
-        // constraint should make this unconditional, but a future
-        // migration that broadens the enum without updating TS would
-        // otherwise crash here — fall back to null and let UI gates
-        // treat the caller as least-privileged.
-        const accountRole = isAccountRole(data.account_role)
-          ? data.account_role
-          : null;
-
-        setProfile({
-          id: data.id,
-          full_name: data.full_name,
-          email: data.email,
-          avatar_url: data.avatar_url,
-          role: data.role,
-          // `beta_features` is `NOT NULL DEFAULT ARRAY[]` in the DB, but
-          // narrow defensively in case the column hasn't been migrated yet
-          // (older deployments running 011 lazily) — `null` reads as no
-          // opt-ins, which is the safe default for any future beta gate.
-          beta_features: data.beta_features ?? [],
-          account_id: data.account_id ?? null,
-          account_role: accountRole,
-        });
-        setAccount(accountRow);
+      if (!data) {
+        console.warn(
+          "[AuthProvider] fetchProfile: authenticated user has no profile row yet",
+          userId,
+        );
+        setProfile(null);
+        setAccount(null);
+        setLegacyAccountSharing(false);
+        return;
       }
+
+      setLegacyAccountSharing(legacy);
+      const row = normalizeProfileRow(data, { userId, legacy });
+
+      let accountRow: AccountSummary | null = null;
+      if (row.account_id && !legacy) {
+        const { data: accountData, error: accountErr } = await supabase
+          .from("accounts")
+          .select("id, name, default_currency")
+          .eq("id", row.account_id)
+          .maybeSingle();
+        if (isMeaningfulPostgrestError(accountErr)) {
+          logSupabaseError("[AuthProvider] fetchAccount error:", accountErr);
+        } else if (accountData) {
+          accountRow = {
+            id: accountData.id,
+            name: accountData.name,
+            default_currency: accountData.default_currency ?? DEFAULT_CURRENCY,
+          };
+        }
+      }
+
+      if (!accountRow && row.account_id) {
+        accountRow = {
+          id: row.account_id,
+          name: row.full_name?.trim() || "My account",
+          default_currency: DEFAULT_CURRENCY,
+        };
+      }
+
+      setProfile({
+        id: row.id,
+        full_name: row.full_name,
+        email: row.email,
+        avatar_url: row.avatar_url,
+        role: row.role,
+        beta_features: row.beta_features,
+        account_id: row.account_id,
+        account_role: row.account_role,
+      });
+      setAccount(accountRow);
     } catch (err) {
       console.error("[AuthProvider] fetchProfile threw:", err);
     } finally {
@@ -220,7 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const safetyTimer = setTimeout(() => {
       if (mounted) {
-        console.warn("[AuthProvider] getSession() timed out after 3s");
+        console.warn("[AuthProvider] getUser() timed out after 3s");
         setLoading(false);
         setProfileLoading(false);
       }
@@ -229,26 +222,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const init = async () => {
       try {
         const {
-          data: { session },
+          data: { user: currentUser },
           error,
-        } = await supabase.auth.getSession();
+        } = await supabase.auth.getUser();
 
-        if (error) console.error("[AuthProvider] getSession error:", error.message);
-
+        if (error) logSupabaseError("[AuthProvider] getUser error:", error);
         if (!mounted) return;
-        const currentUser = session?.user ?? null;
+
         setUser(currentUser);
 
         if (currentUser) {
-          // Don't block session loading on profile fetch — chrome
-          // (header, sidebar) can render from the user object alone,
-          // profile enriches async. Callers that need to branch on
-          // profile data gate on `profileLoading` instead.
           fetchProfile(currentUser.id);
         } else {
-          // No user → no profile to load. Flip profileLoading off so
-          // pages that gate on it don't wait forever on the logged-out
-          // path (the route guard or redirect should fire instead).
           setProfileLoading(false);
         }
       } catch (err) {
@@ -273,6 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setProfile(null);
         setAccount(null);
+        setLegacyAccountSharing(false);
         setProfileLoading(false);
       }
 
@@ -292,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setAccount(null);
+    setLegacyAccountSharing(false);
     window.location.href = "/login";
   }, []);
 
@@ -300,10 +287,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetchProfile(user.id);
   }, [user?.id, fetchProfile]);
 
-  // Derive the role booleans once per profile change rather than on
-  // every consumer render. Cheap regardless, but the memo also gives
-  // each derived value a stable identity for React.memo / useEffect
-  // dependencies downstream.
   const derived = useMemo(() => {
     const role = profile?.account_role ?? null;
     return {
@@ -329,6 +312,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signOut,
         refreshProfile,
         account,
+        legacyAccountSharing,
         defaultCurrency: account?.default_currency ?? DEFAULT_CURRENCY,
         ...derived,
       }}
@@ -338,17 +322,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * useAuth — read the shared auth state from context.
- * Must be used inside an <AuthProvider>.
- */
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {
-    // Fallback for components rendered outside the provider (shouldn't
-    // happen in normal flow, but don't crash the page). Account state
-    // collapses to least-privileged null — every `canX` boolean is
-    // false so UI gates fail closed.
     return {
       user: null,
       profile: null,
@@ -359,6 +335,7 @@ export function useAuth(): AuthContextValue {
       },
       refreshProfile: async () => {},
       account: null,
+      legacyAccountSharing: false,
       defaultCurrency: DEFAULT_CURRENCY,
       accountId: null,
       accountRole: null,

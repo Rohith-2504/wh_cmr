@@ -15,28 +15,35 @@ import type {
   ConversationStatus,
   MessageTemplate,
   Profile,
+  Tag,
 } from "@/types";
 import {
-  MessageSquare,
-  ChevronDown,
-  UserPlus,
-  Check,
   Clock,
   ArrowLeft,
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  MoreVertical,
+  LogOut,
+  Trash2,
+  Eraser,
+  Ban,
+  Loader2,
+  CircleDot,
 } from "lucide-react";
-import { format, isToday, isYesterday, differenceInHours } from "date-fns";
+import { differenceInHours } from "date-fns";
+import {
+  formatDateSeparatorLabel,
+  localDayKey,
+} from "@/lib/dashboard/date-utils";
 import { Badge } from "@/components/ui/badge";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+  InboxActionMenu,
+  InboxAssignFilter,
+  InboxContactTagAssign,
+  INBOX_FILTER_OPTION_CLASS,
+  InboxSingleSelectFilter,
+} from "@/components/inbox/inbox-filter-dropdown";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import {
@@ -48,6 +55,16 @@ import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
+import { useCan } from "@/hooks/use-can";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ReplyDraft {
   id: string;
@@ -74,6 +91,7 @@ interface MessageThreadProps {
     conversationId: string,
     assignedAgentId: string | null,
   ) => void;
+  onContactTagsChange?: (contactId: string, tagIds: string[]) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
    * hidden. This callback lets the page deselect the active conversation
@@ -106,21 +124,20 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  /** Fired after the conversation row is deleted from the DB. */
+  onConversationDeleted?: (conversationId: string) => void;
+  /** Fired after all messages in the conversation are cleared. */
+  onChatCleared?: (conversationId: string) => void;
 }
 
-function formatDateSeparator(dateStr: string): string {
-  const date = new Date(dateStr);
-  if (isToday(date)) return "Today";
-  if (isYesterday(date)) return "Yesterday";
-  return format(date, "MMMM d, yyyy");
-}
+type ChatMenuAction = "delete" | "clear" | "block";
 
 function groupMessagesByDate(messages: Message[]) {
   const groups: { date: string; messages: Message[] }[] = [];
   let currentDate = "";
 
   for (const msg of messages) {
-    const day = format(new Date(msg.created_at), "yyyy-MM-dd");
+    const day = localDayKey(msg.created_at);
     if (day !== currentDate) {
       currentDate = day;
       groups.push({ date: msg.created_at, messages: [msg] });
@@ -133,22 +150,21 @@ function groupMessagesByDate(messages: Message[]) {
 }
 
 const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string }[] = [
-  { label: "Open", value: "open", color: "text-primary" },
-  { label: "Pending", value: "pending", color: "text-amber-400" },
-  { label: "Closed", value: "closed", color: "text-muted-foreground" },
+  { label: "Open", value: "open", color: "text-[var(--wa-green)]" },
+  { label: "Pending", value: "pending", color: "text-amber-500" },
+  { label: "Closed", value: "closed", color: "wa-text-muted" },
 ];
 
 /**
- * WhatsApp-style doodle background applied to the chat area (both the
- * active thread and the empty state). The SVG tile lives at
- * `/public/inbox-doodle.svg`; the slate-950 colour sits underneath so
- * the doodles read as a subtle pattern rather than a stark grid.
- *
- * Defined once at module scope so the two render paths can't drift —
- * if we ever switch the asset, both spots update together.
+ * WhatsApp-style doodle background for the chat area. Colors and tile
+ * are driven by `.inbox-wa` CSS variables in globals.css.
  */
-const DOODLE_BG_CLASSES =
-  "bg-background bg-[url('/inbox-doodle.svg')] bg-repeat";
+const DOODLE_BG_CLASSES = "wa-chat-bg bg-repeat";
+
+interface ThreadContextMenuState {
+  x: number;
+  y: number;
+}
 
 export function MessageThread({
   conversation,
@@ -159,18 +175,24 @@ export function MessageThread({
   onUpdateMessage,
   onStatusChange,
   onAssignChange,
+  onContactTagsChange,
   onBack,
   resyncToken = 0,
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onConversationDeleted,
+  onChatCleared,
 }: MessageThreadProps) {
   const { user } = useAuth();
+  const canAct = useCan("send-messages");
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [contactTagIds, setContactTagIds] = useState<string[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
@@ -195,6 +217,47 @@ export function MessageThread({
     }, 700);
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  const [threadContextMenu, setThreadContextMenu] =
+    useState<ThreadContextMenuState | null>(null);
+  const [pendingChatAction, setPendingChatAction] =
+    useState<ChatMenuAction | null>(null);
+  const [chatActionLoading, setChatActionLoading] = useState(false);
+
+  const closeThreadContextMenu = useCallback(() => {
+    setThreadContextMenu(null);
+  }, []);
+
+  const handleThreadContextMenu = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-message-actions]")) return;
+    e.preventDefault();
+    setThreadContextMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  useEffect(() => {
+    if (!threadContextMenu) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const menu = document.getElementById("thread-context-menu");
+      if (menu?.contains(event.target as Node)) return;
+      closeThreadContextMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeThreadContextMenu();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [threadContextMenu, closeThreadContextMenu]);
+
+  const handleExitChat = useCallback(() => {
+    closeThreadContextMenu();
+    onBack?.();
+  }, [closeThreadContextMenu, onBack]);
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
@@ -218,6 +281,58 @@ export function MessageThread({
       cancelled = true;
     };
   }, []);
+
+  // Account tags + this contact's tag assignments for the header picker.
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+
+    supabase
+      .from("tags")
+      .select("*")
+      .order("name")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch tags:", error);
+          return;
+        }
+        setAllTags((data as Tag[]) ?? []);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const contactId = contact?.id;
+
+  useEffect(() => {
+    if (!contactId) {
+      setContactTagIds([]);
+      return;
+    }
+
+    let cancelled = false;
+    const supabase = createClient();
+
+    supabase
+      .from("contact_tags")
+      .select("tag_id")
+      .eq("contact_id", contactId)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch contact tags:", error);
+          return;
+        }
+        setContactTagIds((data ?? []).map((row) => row.tag_id));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contactId, resyncToken]);
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
@@ -778,22 +893,167 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
+  const handleTagSelect = useCallback(
+    async (tagId: string) => {
+      if (!contact) return;
+      if (!canAct) {
+        toast.error("Read-only — your role can't assign tags");
+        return;
+      }
+      if (contactTagIds.includes(tagId)) return;
+
+      const supabase = createClient();
+
+      if (contactTagIds.length > 0) {
+        const { error: deleteError } = await supabase
+          .from("contact_tags")
+          .delete()
+          .eq("contact_id", contact.id);
+        if (deleteError) {
+          console.error("Failed to replace contact tag:", deleteError);
+          toast.error("Failed to update tag");
+          return;
+        }
+      }
+
+      const { error: insertError } = await supabase
+        .from("contact_tags")
+        .insert({ contact_id: contact.id, tag_id: tagId });
+
+      if (insertError) {
+        console.error("Failed to assign contact tag:", insertError);
+        toast.error("Failed to assign tag");
+        return;
+      }
+
+      const nextTagIds = [tagId];
+      setContactTagIds(nextTagIds);
+      onContactTagsChange?.(contact.id, nextTagIds);
+    },
+    [canAct, contact, contactTagIds, onContactTagsChange],
+  );
+
+  const handleTagUnassign = useCallback(async () => {
+    if (!contact || contactTagIds.length === 0) return;
+    if (!canAct) {
+      toast.error("Read-only — your role can't assign tags");
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("contact_tags")
+      .delete()
+      .eq("contact_id", contact.id);
+
+    if (error) {
+      console.error("Failed to remove contact tag:", error);
+      toast.error("Failed to remove tag");
+      return;
+    }
+
+    setContactTagIds([]);
+    onContactTagsChange?.(contact.id, []);
+  }, [canAct, contact, contactTagIds.length, onContactTagsChange]);
+
+  const handleDeleteChat = useCallback(async () => {
+    if (!conversation || !canAct) return;
+
+    setChatActionLoading(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("conversations")
+      .delete()
+      .eq("id", conversation.id);
+
+    setChatActionLoading(false);
+    setPendingChatAction(null);
+
+    if (error) {
+      console.error("Failed to delete chat:", error);
+      toast.error("Failed to delete chat");
+      return;
+    }
+
+    toast.success("Chat deleted");
+    onConversationDeleted?.(conversation.id);
+  }, [canAct, conversation, onConversationDeleted]);
+
+  const handleClearChat = useCallback(async () => {
+    if (!conversation || !canAct) return;
+
+    setChatActionLoading(true);
+    const supabase = createClient();
+    const { error: messagesError } = await supabase
+      .from("messages")
+      .delete()
+      .eq("conversation_id", conversation.id);
+
+    if (messagesError) {
+      setChatActionLoading(false);
+      setPendingChatAction(null);
+      console.error("Failed to clear chat:", messagesError);
+      toast.error("Failed to clear chat");
+      return;
+    }
+
+    const { error: convError } = await supabase
+      .from("conversations")
+      .update({
+        last_message_text: null,
+        last_message_at: null,
+        unread_count: 0,
+      })
+      .eq("id", conversation.id);
+
+    setChatActionLoading(false);
+    setPendingChatAction(null);
+
+    if (convError) {
+      console.error("Failed to update conversation after clear:", convError);
+      toast.error("Messages cleared, but conversation preview failed to update");
+    } else {
+      toast.success("Chat cleared");
+    }
+
+    setReactions([]);
+    onMessagesLoaded([]);
+    onChatCleared?.(conversation.id);
+  }, [canAct, conversation, onChatCleared, onMessagesLoaded]);
+
+  const handleBlockChat = useCallback(() => {
+    setPendingChatAction(null);
+    toast.info("Blocking contacts is not available yet.");
+  }, []);
+
+  const handleConfirmChatAction = useCallback(() => {
+    if (pendingChatAction === "delete") void handleDeleteChat();
+    else if (pendingChatAction === "clear") void handleClearChat();
+    else if (pendingChatAction === "block") handleBlockChat();
+  }, [handleBlockChat, handleClearChat, handleDeleteChat, pendingChatAction]);
+
+  const openChatAction = useCallback(
+    (action: ChatMenuAction) => {
+      if (!canAct) {
+        toast.error("Read-only — your role can't manage chats");
+        return;
+      }
+      setPendingChatAction(action);
+    },
+    [canAct],
+  );
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
   if (!conversation || !contact) {
     return (
-      <div className={cn("flex flex-1 flex-col items-center justify-center", DOODLE_BG_CLASSES)}>
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-          <MessageSquare className="h-8 w-8 text-muted-foreground" />
-        </div>
-        <h3 className="mt-4 text-sm font-medium text-muted-foreground">
-          Select a conversation
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Choose a conversation from the left to start messaging
-        </p>
-      </div>
+      <div
+        className={cn(
+          "relative flex flex-1 flex-col",
+          DOODLE_BG_CLASSES,
+        )}
+      />
     );
   }
 
@@ -807,6 +1067,8 @@ export function MessageThread({
   const assignLabel = assignedAgentId
     ? (currentAssignee?.full_name ?? "Assigned")
     : "Assign";
+  const assignedTag = allTags.find((t) => contactTagIds.includes(t.id));
+  const tagLabel = assignedTag?.name ?? "Assign tag";
 
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
@@ -817,37 +1079,42 @@ export function MessageThread({
     // clipped and the hover toolbar overlaps the Tags panel. Letting the
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
-    <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
-      {/* Header — solid card surface sits on top of the doodle so the
-          name/avatar/dropdowns stay legible. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
+    <div
+      className={cn(
+        "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+        DOODLE_BG_CLASSES,
+      )}
+      onContextMenu={handleThreadContextMenu}
+    >
+      {/* Chat header — pinned while messages scroll beneath */}
+      <div className="wa-header sticky top-0 z-10 flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          {/* Back-to-list button — mobile only. Hidden on lg+ where the
-              conversation list is always visible next to the thread. */}
           {onBack && (
             <button
               type="button"
               onClick={onBack}
               aria-label="Back to conversations"
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full wa-text-muted transition-colors hover:bg-[var(--wa-hover-row)] lg:hidden"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--wa-search-bg)] text-sm font-medium">
             {displayName.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            <h2 className="truncate text-base font-normal leading-tight">
+              {displayName}
+            </h2>
+            <p className="truncate text-xs wa-text-muted">{contact.phone}</p>
           </div>
-          {/* Session timer badge — hidden on the narrowest phones so
-              the name + back arrow keep their room. */}
           <Badge
             variant="outline"
             className={cn(
-              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
-              sessionInfo.expired ? "text-red-400" : "text-primary"
+              "ml-1 hidden gap-1 border-[var(--wa-border)] bg-transparent text-[10px] sm:inline-flex sm:ml-2",
+              sessionInfo.expired
+                ? "text-red-500"
+                : "text-[var(--wa-green)]",
             )}
           >
             <Clock className="h-3 w-3" />
@@ -855,12 +1122,7 @@ export function MessageThread({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Contact-panel toggle — desktop only. The contact sidebar
-              eats a chunk of horizontal width that crowds the thread on
-              smaller laptops; this lets agents reclaim it when they just
-              want to read and reply. Hidden on mobile, where the sidebar
-              never renders as a permanent panel anyway. Issue #258. */}
+        <div className="flex items-center gap-0.5 sm:gap-1">
           {onToggleContactPanel && (
             <button
               type="button"
@@ -871,23 +1133,20 @@ export function MessageThread({
               aria-pressed={contactPanelOpen}
               title={contactPanelOpen ? "Hide contact" : "Show contact"}
               className={cn(
-                "hidden h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
-                contactPanelOpen ? "text-primary" : "text-muted-foreground",
+                "hidden h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-[var(--wa-hover-row)] lg:inline-flex",
+                contactPanelOpen
+                  ? "text-[var(--wa-green)]"
+                  : "wa-text-muted",
               )}
             >
               {contactPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
+                <PanelRightClose className="h-5 w-5" />
               ) : (
-                <PanelRightOpen className="h-4 w-4" />
+                <PanelRightOpen className="h-5 w-5" />
               )}
             </button>
           )}
 
-          {/* Manual refresh — forces a refetch of the messages + the
-              conversation list (the parent bumps its resyncToken). Useful
-              when realtime missed an event or the agent just wants to be
-              sure nothing's stale. Only rendered when the parent wires
-              up `onRefresh`. */}
           {onRefresh && (
             <button
               type="button"
@@ -895,133 +1154,154 @@ export function MessageThread({
               disabled={isRefreshing}
               aria-label="Refresh conversation"
               title="Refresh"
-              className={cn(
-                "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60",
-              )}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full wa-text-muted transition-colors hover:bg-[var(--wa-hover-row)] disabled:opacity-60"
             >
               <RefreshCw
-                className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
+                className={cn("h-4 w-4", isRefreshing && "animate-spin")}
               />
             </button>
           )}
 
-          {/* Status dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-                  "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
-                  currentStatus?.color ?? "text-muted-foreground"
-                )}>
-                {currentStatus?.label ?? "Status"}
-                <ChevronDown className="h-3 w-3" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="border-border bg-popover"
-            >
-              {STATUS_OPTIONS.map((opt) => (
-                <DropdownMenuItem
-                  key={opt.value}
-                  onClick={() => handleStatusChange(opt.value)}
-                  className={cn("text-sm", opt.color)}
-                >
-                  {opt.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <InboxSingleSelectFilter
+            ariaLabel="Conversation status"
+            panelTitle="Set status"
+            icon={<CircleDot className="h-3.5 w-3.5" strokeWidth={1.75} />}
+            defaultLabel="Status"
+            defaultValue="open"
+            value={conversation.status}
+            options={STATUS_OPTIONS.map((opt) => ({
+              label: opt.label,
+              value: opt.value,
+            }))}
+            onChange={handleStatusChange}
+            getOptionClassName={(opt) => {
+              const meta = STATUS_OPTIONS.find((s) => s.value === opt.value);
+              return meta?.color ?? "text-[var(--wa-text)]";
+            }}
+            triggerLabelOverride={currentStatus?.label ?? "Status"}
+            align="end"
+            triggerClassName={cn(
+              currentStatus?.color ?? "wa-text-muted",
+              "max-w-[6.5rem]",
+            )}
+          />
 
-          {/* Assign dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(
-                "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
-                assignedAgentId ? "text-primary" : "text-muted-foreground"
-              )}
-            >
-              <UserPlus className="h-3 w-3" />
-              <span className="hidden sm:inline">{assignLabel}</span>
-              <ChevronDown className="h-3 w-3" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="border-border bg-popover"
-            >
-              {profiles.length === 0 ? (
-                <DropdownMenuItem disabled className="text-sm text-muted-foreground">
-                  No teammates available
-                </DropdownMenuItem>
-              ) : (
-                profiles.map((p) => {
-                  const isSelected = p.user_id === assignedAgentId;
-                  const presence = getPresence(p.user_id);
-                  return (
-                    <DropdownMenuItem
-                      key={p.id}
-                      onClick={() => handleAssignChange(p.user_id)}
-                      className={cn(
-                        "text-sm",
-                        isSelected ? "text-primary" : "text-popover-foreground"
-                      )}
-                    >
-                      <PresenceDot
-                        status={presence}
-                        label={presenceLabel(
-                          presence,
-                          getRow(p.user_id)?.last_seen_at ?? null,
-                          now
-                        )}
-                        className="mr-2"
-                      />
-                      <span className="flex-1">
-                        {p.full_name}
-                        {p.user_id === user?.id ? " (me)" : ""}
-                      </span>
-                      {isSelected && <Check className="ml-2 h-3 w-3" />}
-                    </DropdownMenuItem>
-                  );
-                })
-              )}
-              {assignedAgentId && (
-                <>
-                  <DropdownMenuSeparator className="bg-border" />
-                  <DropdownMenuItem
-                    onClick={() => handleAssignChange(null)}
-                    className="text-sm text-muted-foreground"
-                  >
-                    Unassign
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <InboxAssignFilter
+            assignLabel={assignLabel}
+            options={profiles.map((p) => {
+              const isSelected = p.user_id === assignedAgentId;
+              const presence = getPresence(p.user_id);
+              return {
+                userId: p.user_id,
+                label: `${p.full_name}${p.user_id === user?.id ? " (me)" : ""}`,
+                selected: isSelected,
+                leading: (
+                  <PresenceDot
+                    status={presence}
+                    label={presenceLabel(
+                      presence,
+                      getRow(p.user_id)?.last_seen_at ?? null,
+                      now,
+                    )}
+                  />
+                ),
+              };
+            })}
+            onSelect={handleAssignChange}
+            onUnassign={
+              assignedAgentId
+                ? () => void handleAssignChange(null)
+                : undefined
+            }
+            align="end"
+          />
+
+          <InboxContactTagAssign
+            tagLabel={tagLabel}
+            options={allTags.map((tag) => ({
+              id: tag.id,
+              name: tag.name,
+              color: tag.color,
+              selected: contactTagIds.includes(tag.id),
+            }))}
+            onSelect={(tagId) => void handleTagSelect(tagId)}
+            onUnassign={
+              contactTagIds.length > 0
+                ? () => void handleTagUnassign()
+                : undefined
+            }
+            disabled={!canAct}
+            align="end"
+          />
+
+          <InboxActionMenu
+            ariaLabel="More options"
+            panelTitle="Chat options"
+            triggerIcon={
+              <MoreVertical className="h-4 w-4" strokeWidth={1.75} />
+            }
+            triggerClassName="h-10 w-10 justify-center px-0"
+            align="end"
+            items={[
+              ...(onBack
+                ? [
+                    {
+                      label: "Exit chat",
+                      icon: <LogOut className="h-4 w-4" />,
+                      onClick: handleExitChat,
+                    },
+                  ]
+                : []),
+              {
+                label: "Delete chat",
+                icon: <Trash2 className="h-4 w-4" />,
+                onClick: () => openChatAction("delete"),
+                disabled: !canAct,
+                destructive: true,
+              },
+              {
+                label: "Clear chat",
+                icon: <Eraser className="h-4 w-4" />,
+                onClick: () => openChatAction("clear"),
+                disabled: !canAct,
+              },
+              {
+                label: "Block chat",
+                icon: <Ban className="h-4 w-4" />,
+                onClick: () => openChatAction("block"),
+                disabled: !canAct,
+              },
+            ]}
+          />
         </div>
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[5%] py-3 sm:px-[8%]"
+      >
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--wa-green)] border-t-transparent" />
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
-            <p className="text-sm text-muted-foreground">No messages yet</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm wa-text-muted">No messages yet</p>
+            <p className="text-xs wa-text-muted">
               Send a template to start the conversation
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-1">
             {messageGroups.map((group) => (
               <div key={group.date}>
-                {/* Date separator */}
-                <div className="mb-4 flex items-center justify-center">
-                  <span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">
-                    {formatDateSeparator(group.date)}
+                <div className="mb-3 mt-1 flex items-center justify-center">
+                  <span className="wa-date-pill rounded-lg px-3 py-1.5 text-xs shadow-sm">
+                    {formatDateSeparatorLabel(group.date)}
                   </span>
                 </div>
-                {/* Messages */}
-                <div className="space-y-2">
+                <div className="space-y-0.5">
                   {group.messages.map((msg) => {
                     const parent = msg.reply_to_message_id
                       ? messagesById.get(msg.reply_to_message_id)
@@ -1086,6 +1366,118 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
+
+      <Dialog
+        open={pendingChatAction !== null}
+        onOpenChange={(open) => {
+          if (!open && !chatActionLoading) setPendingChatAction(null);
+        }}
+      >
+        <DialogContent className="border-[var(--wa-border)] bg-[var(--wa-panel)] text-[var(--wa-text)] sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-[var(--wa-text)]">
+              {pendingChatAction === "delete" && "Delete chat"}
+              {pendingChatAction === "clear" && "Clear chat"}
+              {pendingChatAction === "block" && "Block chat"}
+            </DialogTitle>
+            <DialogDescription className="wa-text-muted">
+              {pendingChatAction === "delete" && (
+                <>
+                  Delete this conversation with{" "}
+                  <span className="font-medium text-[var(--wa-text)]">
+                    {displayName}
+                  </span>
+                  ? All messages will be permanently removed. This cannot be
+                  undone.
+                </>
+              )}
+              {pendingChatAction === "clear" && (
+                <>
+                  Remove all messages in this chat with{" "}
+                  <span className="font-medium text-[var(--wa-text)]">
+                    {displayName}
+                  </span>
+                  ? The conversation will stay in your inbox.
+                </>
+              )}
+              {pendingChatAction === "block" && (
+                <>
+                  Block{" "}
+                  <span className="font-medium text-[var(--wa-text)]">
+                    {displayName}
+                  </span>
+                  ? You will no longer receive messages from this contact.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="border-[var(--wa-border)] bg-[var(--wa-panel)]">
+            <Button
+              variant="outline"
+              onClick={() => setPendingChatAction(null)}
+              disabled={chatActionLoading}
+              className="border-[var(--wa-border)] wa-text-muted hover:bg-[var(--wa-hover-row)]"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={
+                pendingChatAction === "delete" ? "destructive" : "default"
+              }
+              onClick={handleConfirmChatAction}
+              disabled={chatActionLoading}
+              className={
+                pendingChatAction === "clear" || pendingChatAction === "block"
+                  ? "bg-[var(--wa-green)] text-white hover:bg-[var(--wa-green)]/90"
+                  : undefined
+              }
+            >
+              {chatActionLoading && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              {pendingChatAction === "delete" && "Delete chat"}
+              {pendingChatAction === "clear" && "Clear chat"}
+              {pendingChatAction === "block" && "Block chat"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {threadContextMenu && (
+        <div
+          id="thread-context-menu"
+          role="menu"
+          className="fixed z-50 min-w-44 rounded-lg border border-[var(--wa-border)] bg-[var(--wa-panel)] p-0 text-[var(--wa-text)] shadow-md"
+          style={{ left: threadContextMenu.x, top: threadContextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="border-b border-[var(--wa-border)] px-3 py-2">
+            <span className="text-[13px] font-medium text-[var(--wa-text)]">
+              Chat options
+            </span>
+          </div>
+          <div className="py-1">
+            {onBack && (
+              <button
+                type="button"
+                role="menuitem"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleExitChat();
+                }}
+                className={cn(
+                  INBOX_FILTER_OPTION_CLASS,
+                  "w-full text-left text-[13px] text-[var(--wa-text)]",
+                )}
+              >
+                <LogOut className="h-4 w-4 wa-text-muted" />
+                Exit chat
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

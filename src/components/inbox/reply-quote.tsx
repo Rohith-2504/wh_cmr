@@ -31,19 +31,19 @@ export function ReplyQuote({
     <div
       className={cn(
         "flex items-start gap-2 border-l-2 px-2 py-1",
-        onPrimary ? "border-primary-foreground/50" : "border-primary",
+        onPrimary ? "border-[var(--wa-green)]" : "border-[var(--wa-green)]",
         isChip
-          ? "rounded-md bg-muted/80"
+          ? "rounded-md bg-[var(--wa-search-bg)]"
           : onPrimary
-            ? "mb-1.5 rounded-md bg-primary-foreground/15"
-            : "mb-1.5 rounded-md bg-background/20",
+            ? "mb-1.5 rounded-md bg-black/5"
+            : "mb-1.5 rounded-md bg-black/[0.04]",
       )}
     >
       <div className="min-w-0 flex-1 overflow-hidden">
         <div
           className={cn(
             "truncate text-[11px] font-medium",
-            onPrimary ? "text-primary-foreground" : "text-primary",
+            onPrimary ? "text-[var(--wa-green)]" : "text-[var(--wa-green)]",
           )}
         >
           {authorLabel}
@@ -55,7 +55,7 @@ export function ReplyQuote({
          *  layout wider, shoving the contact sidebar off-screen.
          *  `break-words` also wraps long URLs that have no whitespace
          *  to break on. Issue #165. */}
-        <div className="whitespace-pre-wrap break-words text-xs text-foreground/80">
+        <div className="whitespace-pre-wrap break-words text-xs wa-text-muted">
           {preview}
         </div>
       </div>

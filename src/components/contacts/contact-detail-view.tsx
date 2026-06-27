@@ -4,23 +4,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
+import { formatDateNote } from '@/lib/dashboard/date-utils';
 import { toast } from 'sonner';
-import type { Contact, Tag, ContactTag, ContactNote, CustomField, ContactCustomValue, Deal } from '@/types';
+import type { Contact, Tag, ContactNote, CustomField, Deal } from '@/types';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone,
   Mail,
@@ -31,7 +30,6 @@ import {
   Plus,
   Trash2,
   Save,
-  X,
   DollarSign,
 } from 'lucide-react';
 
@@ -328,32 +326,33 @@ export function ContactDetailView({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="bg-popover border-border text-popover-foreground sm:max-w-lg w-full p-0"
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton
+        data-clay-modal-content
+        className="clay-card fixed top-4 right-4 bottom-4 left-auto flex w-[min(32rem,calc(100%-2rem))] max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-3xl p-0 text-popover-foreground ring-0 sm:top-6 sm:right-6 sm:bottom-6"
       >
         {loading || !contact ? (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex h-full items-center justify-center">
             <Loader2 className="size-6 animate-spin text-primary" />
           </div>
         ) : (
-          <div className="flex flex-col h-full">
+          <div className="flex h-full min-h-0 flex-col">
             {/* Header */}
-            <SheetHeader className="p-4 border-b border-border/50">
+            <DialogHeader className="border-b border-border/50 p-4 pr-12">
               <div className="flex items-center gap-3">
-                <Avatar className="size-12 bg-muted border border-border">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+                <Avatar className="size-12 border border-border bg-muted">
+                  <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
                     {getInitials(contact.name)}
                   </AvatarFallback>
                 </Avatar>
-                <div className="flex-1 min-w-0">
-                  <SheetTitle className="text-popover-foreground truncate">
+                <div className="min-w-0 flex-1">
+                  <DialogTitle className="truncate text-popover-foreground">
                     {contact.name || 'Unknown'}
-                  </SheetTitle>
-                  <SheetDescription className="text-muted-foreground text-xs mt-0.5">
+                  </DialogTitle>
+                  <DialogDescription className="mt-0.5 text-xs text-muted-foreground">
                     Contact details
-                  </SheetDescription>
+                  </DialogDescription>
                   <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-muted-foreground">
                     <button
                       onClick={copyPhone}
@@ -382,7 +381,7 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-            </SheetHeader>
+            </DialogHeader>
 
             {/* Tabs */}
             <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
@@ -562,13 +561,7 @@ export function ContactDetailView({
                           </button>
                         </div>
                         <p className="text-xs text-muted-foreground mt-1.5">
-                          {new Date(note.created_at).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                          {formatDateNote(note.created_at)}
                         </p>
                       </div>
                     ))
@@ -682,7 +675,7 @@ export function ContactDetailView({
             </Tabs>
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

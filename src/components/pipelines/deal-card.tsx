@@ -11,12 +11,10 @@ interface DealCardProps {
   isOverlay?: boolean;
 }
 
+import { formatDateMedium } from "@/lib/dashboard/date-utils";
+
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDateMedium(dateStr);
 }
 
 function initials(name?: string, fallback?: string) {

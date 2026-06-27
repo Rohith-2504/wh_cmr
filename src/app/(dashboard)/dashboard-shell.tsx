@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
+import { cn } from "@/lib/utils";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -14,10 +15,13 @@ import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const isInbox = pathname.startsWith("/inbox");
 
   // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
   // always visible and this stays at `false` (ignored by the component).
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   useEffect(() => {
@@ -40,18 +44,24 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background p-2.5 lg:p-3.5 gap-2.5 lg:gap-3.5">
+    <div className="flex h-screen w-screen flex-col gap-2.5 overflow-hidden bg-background p-2.5 lg:gap-3.5 lg:p-3.5">
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
-      
-      {/* Separate Top Navbar */}
-      <Header onOpenSidebar={() => setSidebarOpen(true)} />
-      
+
+      <Header onOpenSidebar={openSidebar} />
+
       {/* Bottom Layout Row: Sidebar + main content */}
-      <div className="flex flex-1 overflow-hidden gap-2.5 lg:gap-3.5">
+      <div className="flex min-h-0 flex-1 gap-2.5 overflow-hidden lg:gap-3.5">
         <Sidebar open={sidebarOpen} onClose={closeSidebar} />
-        <main className="flex-1 overflow-y-auto rounded-2xl border border-border/60 bg-card p-4 sm:p-6 shadow-sm">
+        <main
+          className={cn(
+            "flex-1 scrollbar-hide rounded-2xl border border-border/60 shadow-sm",
+            isInbox
+              ? "flex min-h-0 flex-col overflow-hidden bg-[#f0f2f5] p-0 dark:bg-[#111b21]"
+              : "overflow-y-auto bg-card p-4 sm:p-6",
+          )}
+        >
           {children}
         </main>
       </div>

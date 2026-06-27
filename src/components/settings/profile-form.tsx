@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Loader2, Upload, Trash2, Mail, CircleAlert } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
+import { formatDateLong } from '@/lib/dashboard/date-utils';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -196,13 +197,7 @@ export function ProfileForm() {
       pendingAvatar !== null ||
       removeAvatar);
 
-  const joined = user?.created_at
-    ? new Date(user.created_at).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    : '—';
+  const joined = user?.created_at ? formatDateLong(user.created_at) : '—';
 
   return (
     <section className="max-w-2xl animate-in fade-in-50 duration-200">

@@ -15,7 +15,11 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
+import {
+  formatDateTime,
+  formatTimeWithSeconds,
+} from "@/lib/dashboard/date-utils";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -256,7 +260,7 @@ function RunCard({
             )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span>Started {format(new Date(run.started_at), "PP p")}</span>
+            <span>Started {formatDateTime(run.started_at)}</span>
             {run.reprompt_count > 0 && (
               <span>· {run.reprompt_count} re-prompts</span>
             )}
@@ -308,7 +312,7 @@ function EventLine({ ev }: { ev: EventRow }) {
   return (
     <div className="flex items-start gap-2 rounded-md px-2 py-1 text-xs">
       <span className="w-32 shrink-0 text-[10px] text-muted-foreground">
-        {format(new Date(ev.created_at), "HH:mm:ss")}
+        {formatTimeWithSeconds(ev.created_at)}
       </span>
       <span className={cn("w-32 shrink-0 font-mono text-[10px]", cls)}>
         {ev.event_type}

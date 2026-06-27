@@ -21,6 +21,7 @@ import { NextResponse } from "next/server";
 import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { schemaMigrationHint } from "@/lib/auth/migration-errors";
 import {
   clampExpiryDays,
   generateInviteToken,
@@ -37,12 +38,38 @@ import {
 let _adminClient: ReturnType<typeof createSupabaseAdminClient> | null = null;
 function supabaseAdmin() {
   if (!_adminClient) {
-    _adminClient = createSupabaseAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) {
+      throw new Error(
+        "SUPABASE_SERVICE_ROLE_KEY is not configured — invitation emails cannot be sent",
+      );
+    }
+    _adminClient = createSupabaseAdminClient(url, key);
   }
   return _adminClient;
+}
+
+/** Map Supabase Auth admin errors to actionable operator messages. */
+function describeInviteEmailError(message: string): string {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes("already") &&
+    (lower.includes("registered") || lower.includes("exists"))
+  ) {
+    return "This email already has an account. Share the invite link directly — they can sign in and redeem it.";
+  }
+  if (lower.includes("rate limit") || lower.includes("too many")) {
+    return "Email rate limit reached. Wait a few minutes or share the invite link manually.";
+  }
+  if (
+    lower.includes("smtp") ||
+    lower.includes("email") ||
+    lower.includes("mail")
+  ) {
+    return `Email could not be sent (${message}). Configure SMTP under Supabase → Project Settings → Auth, or share the invite link manually.`;
+  }
+  return message;
 }
 
 // Resolve the base URL we publish invite links under.
@@ -146,8 +173,6 @@ function getBaseUrl(request: Request): string {
   return "https://wacrm.tech";
 }
 
-const MAX_LABEL_LEN = 80;
-
 export async function GET() {
   try {
     const ctx = await requireRole("admin");
@@ -164,9 +189,14 @@ export async function GET() {
 
     if (error) {
       console.error("[GET /api/account/invitations] fetch error:", error);
+      const hint = schemaMigrationHint(
+        error,
+        "Team invitations",
+        "supabase/migrations/017_account_sharing.sql (and 019_invitation_rpcs.sql for redeem)",
+      );
       return NextResponse.json(
-        { error: "Failed to load invitations" },
-        { status: 500 },
+        { error: hint ?? "Failed to load invitations" },
+        { status: hint ? 503 : 500 },
       );
     }
 
@@ -249,24 +279,35 @@ export async function POST(request: Request) {
 
     let emailSent = false;
     let emailErrorMsg: string | null = null;
+    const joinUrl = inviteUrl(token, getBaseUrl(request));
+    const redirectTo = `${getBaseUrl(request)}/auth/callback?next=/join/${token}`;
+
     try {
-      const { error: inviteError } = await supabaseAdmin().auth.admin.inviteUserByEmail(email.trim(), {
-        redirectTo: `${getBaseUrl(request)}/auth/callback?next=/join/${token}`
-      });
+      const admin = supabaseAdmin();
+      const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
+        email.trim(),
+        { redirectTo },
+      );
       if (inviteError) {
-        emailErrorMsg = inviteError.message;
+        emailErrorMsg = describeInviteEmailError(inviteError.message);
+        console.warn(
+          "[POST /api/account/invitations] inviteUserByEmail failed:",
+          inviteError.message,
+        );
       } else {
         emailSent = true;
       }
-    } catch (err: any) {
-      emailErrorMsg = err?.message || String(err);
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : String(err);
+      emailErrorMsg = describeInviteEmailError(raw);
+      console.warn("[POST /api/account/invitations] email send error:", raw);
     }
 
     return NextResponse.json(
       {
         invitation: data,
         token,
-        url: inviteUrl(token, getBaseUrl(request)),
+        url: joinUrl,
         expiresInDays: expiryDays,
         emailSent,
         emailError: emailErrorMsg

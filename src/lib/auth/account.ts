@@ -29,6 +29,10 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
+import {
+  isMissingColumnError,
+  mapLegacyProfileRole,
+} from "./profile-load";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
 // ------------------------------------------------------------
@@ -89,6 +93,12 @@ export interface AccountContext {
   role: AccountRole;
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
+  /**
+   * True when the DB predates migration 017 (no profiles.account_id).
+   * Callers that scope roster queries must filter by user_id instead
+   * of account_id in this mode.
+   */
+  legacyAccountSharing: boolean;
 }
 
 /**
@@ -116,9 +126,43 @@ export async function getCurrentAccount(): Promise<AccountContext> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("account_id, account_role")
+    .select("account_id, account_role, full_name")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  // Pre-017 databases have no account_id / account_role columns — the
+  // SELECT fails with Postgres 42703. Fall back to the legacy profile
+  // shape so authenticated users still get owner-level context and
+  // single-user roster UIs (Settings → Team members) keep working until
+  // supabase/migrations/017_account_sharing.sql is applied.
+  if (error && isMissingColumnError(error)) {
+    const { data: legacy, error: legacyErr } = await supabase
+      .from("profiles")
+      .select("full_name, role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (legacyErr) {
+      console.error("[getCurrentAccount] legacy profile fetch error:", legacyErr);
+      throw new ForbiddenError("Could not load account context");
+    }
+    if (!legacy) {
+      throw new ForbiddenError("Profile not found");
+    }
+
+    const role = mapLegacyProfileRole(legacy.role);
+    const accountName =
+      legacy.full_name?.trim() || "My account";
+
+    return {
+      supabase,
+      userId: user.id,
+      accountId: user.id,
+      role,
+      account: { id: user.id, name: accountName },
+      legacyAccountSharing: true,
+    };
+  }
 
   if (error) {
     console.error("[getCurrentAccount] profile fetch error:", error);
@@ -169,6 +213,7 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     accountId: data.account_id,
     role: data.account_role,
     account: { id: account.id, name: account.name },
+    legacyAccountSharing: false,
   };
 }
 

@@ -27,6 +27,11 @@ export interface CurrencyOption {
  * `Intl.NumberFormat` renders the right symbol/grouping. Extend this
  * list to offer more — nothing else needs to change.
  */
+/** True when `code` satisfies the accounts.default_currency DB CHECK. */
+export function isValidCurrencyCode(code: string): boolean {
+  return /^[A-Z]{3}$/.test(code.trim());
+}
+
 export const CURRENCIES: CurrencyOption[] = [
   { code: "USD", label: "US Dollar", symbol: "$" },
   { code: "EUR", label: "Euro", symbol: "€" },

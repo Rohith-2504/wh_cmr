@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Broadcast } from '@/types';
+import { formatDateMedium } from '@/lib/dashboard/date-utils';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -274,7 +275,7 @@ export default function BroadcastsPage() {
                       </span>
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground sm:table-cell">
-                      {new Date(broadcast.created_at).toLocaleDateString()}
+                      {formatDateMedium(broadcast.created_at)}
                     </TableCell>
                   </TableRow>
                 );

@@ -19,6 +19,13 @@ export const THEME_IDS = [
   "cobalt",
   "amber",
   "rose",
+  "teal",
+  "indigo",
+  "cyan",
+  "lime",
+  "orange",
+  "pink",
+  "slate",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -96,6 +103,48 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
     name: "Rose",
     tagline: "Bold and modern — D2C, creator-economy, lifestyle.",
     swatch: "oklch(0.645 0.22 16)",
+  },
+  {
+    id: "teal",
+    name: "Teal",
+    tagline: "Calm and refreshing — great for support & wellness brands.",
+    swatch: "oklch(0.62 0.14 195)",
+  },
+  {
+    id: "indigo",
+    name: "Indigo",
+    tagline: "Deep and trustworthy — enterprise, fintech, legal.",
+    swatch: "oklch(0.55 0.22 262)",
+  },
+  {
+    id: "cyan",
+    name: "Cyan",
+    tagline: "Electric and energetic — tech startups, developer tools.",
+    swatch: "oklch(0.72 0.18 220)",
+  },
+  {
+    id: "lime",
+    name: "Lime",
+    tagline: "Fresh and punchy — food, health, sustainability.",
+    swatch: "oklch(0.77 0.2 128)",
+  },
+  {
+    id: "orange",
+    name: "Orange",
+    tagline: "Energetic and approachable — retail, food delivery, events.",
+    swatch: "oklch(0.72 0.19 50)",
+  },
+  {
+    id: "pink",
+    name: "Pink",
+    tagline: "Playful and vibrant — beauty, fashion, entertainment.",
+    swatch: "oklch(0.68 0.22 340)",
+  },
+  {
+    id: "slate",
+    name: "Slate",
+    tagline: "Neutral and professional — minimal, B2B, corporate.",
+    swatch: "oklch(0.56 0.07 240)",
   },
 ];
 

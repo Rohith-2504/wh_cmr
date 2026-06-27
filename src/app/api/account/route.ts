@@ -2,7 +2,7 @@
 // /api/account
 //
 //   GET   — current caller's account + role. Any member.
-//   PATCH — rename the account.                  Admin+.
+//   PATCH — rename the account or update default_currency. Admin+.
 //
 // Why both verbs share a route file
 //   They speak about the same singular resource (the caller's
@@ -18,6 +18,7 @@ import {
   getCurrentAccount,
   toErrorResponse,
 } from "@/lib/auth/account";
+import { isValidCurrencyCode } from "@/lib/currency";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -53,28 +54,65 @@ export async function PATCH(request: Request) {
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as
-      | { name?: unknown }
+      | { name?: unknown; default_currency?: unknown }
       | null;
-    const rawName = body?.name;
 
-    if (typeof rawName !== "string") {
+    const updates: { name?: string; default_currency?: string } = {};
+
+    if (body?.name !== undefined) {
+      if (typeof body.name !== "string") {
+        return NextResponse.json(
+          { error: "'name' must be a string" },
+          { status: 400 },
+        );
+      }
+      const name = body.name.trim();
+      if (name.length === 0) {
+        return NextResponse.json(
+          { error: "Account name cannot be empty" },
+          { status: 400 },
+        );
+      }
+      if (name.length > MAX_NAME_LEN) {
+        return NextResponse.json(
+          { error: `Account name must be ${MAX_NAME_LEN} characters or fewer` },
+          { status: 400 },
+        );
+      }
+      updates.name = name;
+    }
+
+    if (body?.default_currency !== undefined) {
+      if (typeof body.default_currency !== "string") {
+        return NextResponse.json(
+          { error: "'default_currency' must be a string" },
+          { status: 400 },
+        );
+      }
+      const code = body.default_currency.trim().toUpperCase();
+      if (!isValidCurrencyCode(code)) {
+        return NextResponse.json(
+          { error: "Currency must be a 3-letter ISO code (e.g. USD)" },
+          { status: 400 },
+        );
+      }
+      updates.default_currency = code;
+    }
+
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json(
-        { error: "'name' must be a string" },
+        { error: "Provide 'name' and/or 'default_currency' to update" },
         { status: 400 },
       );
     }
 
-    const name = rawName.trim();
-    if (name.length === 0) {
+    if (ctx.legacyAccountSharing) {
       return NextResponse.json(
-        { error: "Account name cannot be empty" },
-        { status: 400 },
-      );
-    }
-    if (name.length > MAX_NAME_LEN) {
-      return NextResponse.json(
-        { error: `Account name must be ${MAX_NAME_LEN} characters or fewer` },
-        { status: 400 },
+        {
+          error:
+            "Account settings require the account-sharing migration. Run supabase/migrations/017_account_sharing.sql (and 021 for currency).",
+        },
+        { status: 503 },
       );
     }
 
@@ -83,17 +121,20 @@ export async function PATCH(request: Request) {
     // guaranteed the caller is admin+.
     const { data, error } = await ctx.supabase
       .from("accounts")
-      .update({ name })
+      .update(updates)
       .eq("id", ctx.accountId)
-      .select("id, name")
+      .select("id, name, default_currency")
       .single();
 
     if (error) {
       console.error("[PATCH /api/account] update error:", error);
-      return NextResponse.json(
-        { error: "Failed to update account" },
-        { status: 500 },
-      );
+      const hint =
+        error.code === "42703"
+          ? "The default_currency column is missing — apply migration 021_account_default_currency.sql."
+          : error.code === "23514"
+            ? "Invalid currency code for this account."
+            : "Failed to update account";
+      return NextResponse.json({ error: hint }, { status: 500 });
     }
 
     return NextResponse.json({ account: data });

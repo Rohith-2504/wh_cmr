@@ -15,6 +15,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { formatDateTime } from '@/lib/dashboard/date-utils';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,7 +43,7 @@ export function WhatsAppConfig() {
   // context and key every read off it — so a teammate who just
   // joined an account sees the inviter's saved config without
   // having to re-enter anything.
-  const { user, accountId, loading: authLoading, profileLoading } = useAuth();
+  const { user, accountId, loading: authLoading, profileLoading, legacyAccountSharing } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -85,19 +86,16 @@ export function WhatsAppConfig() {
       ? `${window.location.origin}/api/whatsapp/webhook`
       : '';
 
-  const fetchConfig = useCallback(async (acctId: string) => {
+  const fetchConfig = useCallback(async (acctId: string, userId: string, legacy: boolean) => {
     setLoading(true);
     try {
-      // Load form values from Supabase (shows what's in DB).
-      // Switched from `user_id` (which would only match the row's
-      // original author) to `account_id` so every member of the
-      // account sees the same saved configuration. UNIQUE(account_id)
-      // on the table guarantees the .maybeSingle() return type
-      // remains accurate.
+      const scopeColumn = legacy ? 'user_id' : 'account_id';
+      const scopeValue = legacy ? userId : acctId;
+
       const { data, error } = await supabase
         .from('whatsapp_config')
         .select('*')
-        .eq('account_id', acctId)
+        .eq(scopeColumn, scopeValue)
         .maybeSingle();
 
       if (error) {
@@ -167,8 +165,8 @@ export function WhatsAppConfig() {
       setLoading(false);
       return;
     }
-    fetchConfig(accountId);
-  }, [authLoading, profileLoading, user, accountId, fetchConfig]);
+    fetchConfig(accountId, user.id, legacyAccountSharing);
+  }, [authLoading, profileLoading, user, accountId, legacyAccountSharing, fetchConfig]);
 
   async function handleSave() {
     if (!phoneNumberId.trim()) {
@@ -256,7 +254,9 @@ export function WhatsAppConfig() {
         setPin('');
       }
 
-      if (accountId) await fetchConfig(accountId);
+      if (accountId && user) {
+        await fetchConfig(accountId, user.id, legacyAccountSharing);
+      }
     } catch (err) {
       console.error('Save error:', err);
       toast.error('Failed to save configuration');
@@ -312,7 +312,9 @@ export function WhatsAppConfig() {
           { duration: 8000 },
         );
       }
-      if (accountId) await fetchConfig(accountId);
+      if (accountId && user) {
+        await fetchConfig(accountId, user.id, legacyAccountSharing);
+      }
     } catch (err) {
       console.error('verify-registration failed:', err);
       toast.error('Could not reach the verification endpoint.');
@@ -489,7 +491,7 @@ export function WhatsAppConfig() {
                 <>
                   Subscribed since{' '}
                   {config.registered_at
-                    ? new Date(config.registered_at).toLocaleString()
+                    ? formatDateTime(config.registered_at)
                     : 'unknown'}
                   . Click <strong>Verify with Meta</strong> if events
                   stop arriving.

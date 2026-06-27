@@ -68,6 +68,16 @@ function isSection(value: string | null): value is SettingsSection {
   return !!value && (SETTINGS_SECTIONS as readonly string[]).includes(value);
 }
 
+/** Old flat-tab slugs that still appear in bookmarks and docs. */
+const LEGACY_TAB_ALIASES: Record<string, SettingsSection> = {
+  tags: 'fields',
+  'custom-fields': 'fields',
+  'api-keys': 'api',
+  api_keys: 'api',
+  team: 'members',
+  'team-members': 'members',
+};
+
 /**
  * Resolve a raw `?tab=` value to a section. Legacy tabs from the old
  * flat layout collapse onto their new home (Tags + Custom fields → the
@@ -75,7 +85,9 @@ function isSection(value: string | null): value is SettingsSection {
  * Overview landing.
  */
 export function resolveSection(raw: string | null): SettingsSection {
-  if (raw === 'tags' || raw === 'custom-fields') return 'fields';
+  if (!raw) return DEFAULT_SECTION;
+  const aliased = LEGACY_TAB_ALIASES[raw];
+  if (aliased) return aliased;
   if (isSection(raw)) return raw;
   return DEFAULT_SECTION;
 }

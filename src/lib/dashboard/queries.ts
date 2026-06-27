@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   daysAgoStart,
-  DOW_SHORT_MON_FIRST,
   lastNDayKeys,
   localDayKey,
   mondayIndex,
@@ -167,19 +166,21 @@ export async function loadPipelineDonut(db: DB): Promise<PipelineDonutData> {
   }
 }
 
-// --- 4. Response time by day of week ----------------------------------
+// --- 4. Response time by calendar day ----------------------------------
 
-export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
-  // Pull the last 14 days of messages in one shot, then walk per
-  // conversation to find each "first inbound" → "first subsequent
-  // outbound" pair. 14 days gives us both "this week" + "last week"
-  // with enough overlap if the user opens the dashboard late on a
-  // Monday.
-  const fourteenDaysAgo = daysAgoStart(13).toISOString()
+export async function loadResponseTime(
+  db: DB,
+  rangeDays: number,
+): Promise<ResponseTimeSummary> {
+  // Walk per conversation to find each "first inbound" → "first subsequent
+  // outbound" pair. A single customer message can only count once (avoids
+  // inflating averages if the customer double-messages while the agent
+  // takes time to reply).
+  const start = daysAgoStart(rangeDays - 1).toISOString()
   const { data, error } = await db
     .from('messages')
     .select('conversation_id, sender_type, created_at')
-    .gte('created_at', fourteenDaysAgo)
+    .gte('created_at', start)
     .order('conversation_id', { ascending: true })
     .order('created_at', { ascending: true })
   if (error) throw error
@@ -190,10 +191,6 @@ export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
     created_at: string
   }[]
 
-  // Group per conversation, pair unreplied customer messages with the
-  // next outbound message from the agent/bot. A single customer message
-  // can only count once (avoids inflating averages if the customer
-  // double-messages while the agent takes time to reply).
   interface Sample {
     customerAt: Date
     responseAt: Date
@@ -220,19 +217,18 @@ export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
   const thisWeekStart = daysAgoStart(mondayIndex(now))
   const lastWeekStart = daysAgoStart(mondayIndex(now) + 7)
 
-  // Per-day-of-week buckets, averaged over both weeks' worth of data
-  // so each bar has more samples to stand on. If a day has no samples
-  // its avgMinutes stays null and the chart renders the bar muted.
-  const byDow = new Map<number, number[]>()
-  for (let i = 0; i < 7; i++) byDow.set(i, [])
+  const keys = lastNDayKeys(rangeDays)
+  const byDay = new Map<string, number[]>()
+  for (const k of keys) byDay.set(k, [])
   const thisWeekMins: number[] = []
   const lastWeekMins: number[] = []
 
   for (const s of samples) {
     const diffMin = (s.responseAt.getTime() - s.customerAt.getTime()) / 60_000
     if (diffMin < 0) continue
-    const dow = mondayIndex(s.customerAt)
-    byDow.get(dow)!.push(diffMin)
+    const key = localDayKey(s.customerAt)
+    const bucket = byDay.get(key)
+    if (bucket) bucket.push(diffMin)
     if (s.customerAt >= thisWeekStart) {
       thisWeekMins.push(diffMin)
     } else if (s.customerAt >= lastWeekStart && s.customerAt < thisWeekStart) {
@@ -243,18 +239,14 @@ export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
   const avg = (arr: number[]) =>
     arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length
 
-  const buckets: ResponseTimeBucket[] = Array.from({ length: 7 }, (_, dow) => {
-    const samples = byDow.get(dow) ?? []
+  const buckets: ResponseTimeBucket[] = keys.map((day) => {
+    const daySamples = byDay.get(day) ?? []
     return {
-      dow,
-      avgMinutes: avg(samples),
-      samples: samples.length,
+      day,
+      avgMinutes: avg(daySamples),
+      samples: daySamples.length,
     }
   })
-
-  // Silence unused-label warnings — keep the arrays explicitly named
-  // for readability above.
-  void DOW_SHORT_MON_FIRST
 
   return {
     buckets,

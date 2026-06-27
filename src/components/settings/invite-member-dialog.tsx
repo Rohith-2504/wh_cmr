@@ -62,11 +62,6 @@ const ROLE_DESCRIPTIONS: Record<InviteRole, string> = {
   viewer: 'Read-only access across every page. Cannot send or edit anything.',
 };
 
-// Server caps label at 80 chars (see src/app/api/account/invitations/route.ts).
-// Mirror it on the client so we short-circuit before the round-trip
-// rather than letting the user submit and bounce off a 400.
-const MAX_LABEL_LEN = 80;
-
 interface CreatedInvite {
   url: string;
   role: InviteRole;
@@ -76,6 +71,7 @@ interface CreatedInvite {
   accountName: string;
   email: string;
   emailSent: boolean;
+  emailError: string | null;
 }
 
 export function InviteMemberDialog({
@@ -126,6 +122,7 @@ export function InviteMemberDialog({
         url: string;
         expiresInDays: number;
         emailSent: boolean;
+        emailError?: string | null;
       };
 
       setResult({
@@ -140,6 +137,7 @@ export function InviteMemberDialog({
         accountName: account?.name ?? 'our wacrm account',
         email: trimmedEmail,
         emailSent: data.emailSent,
+        emailError: data.emailError ?? null,
       });
       onCreated();
     } catch (err) {
@@ -238,13 +236,26 @@ export function InviteMemberDialog({
                   <strong>{result.expiresInDays} days</strong>. If the email doesn&apos;t arrive in their inbox, please ask them to check their Spam folder or share this backup link directly.
                 </div>
               ) : (
-                <div className="rounded-md border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200">
-                  <strong className="font-semibold text-amber-100">
-                    Save this link now.
-                  </strong>{' '}
-                  We never store the plaintext — once you close this dialog
-                  the URL is gone. To re-share, revoke this invite and create
-                  a new one.
+                <div className="space-y-2">
+                  <div className="rounded-md border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200">
+                    <strong className="font-semibold text-amber-100">
+                      {result.emailError
+                        ? "Email not sent."
+                        : "Save this link now."}
+                    </strong>{' '}
+                    {result.emailError ? (
+                      <>
+                        {result.emailError} Copy the invite link below and
+                        share it with {result.email} directly.
+                      </>
+                    ) : (
+                      <>
+                        We never store the plaintext — once you close this dialog
+                        the URL is gone. To re-share, revoke this invite and create
+                        a new one.
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 

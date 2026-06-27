@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentAccount, UnauthorizedError } from '@/lib/auth/account'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   getSubscribedApps,
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api'
+import { getWhatsAppConfigScope } from '@/lib/whatsapp/config-scope'
 
 /**
  * GET /api/whatsapp/config/verify-registration
@@ -29,25 +30,13 @@ import {
  * what the UI badges on.
  */
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  // whatsapp_config is one-row-per-account post-017. Resolve the
-  // caller's account_id so a teammate who joined an existing account
-  // sees the same registration state as the admin who set it up.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  const accountId = profile?.account_id as string | undefined
-  if (!accountId) {
+  let ctx
+  try {
+    ctx = await getCurrentAccount()
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
     return NextResponse.json({
       live: false,
       checks: { config_exists: false },
@@ -55,10 +44,11 @@ export async function GET() {
     })
   }
 
-  const { data: config } = await supabase
+  const scope = getWhatsAppConfigScope(ctx)
+  const { data: config } = await ctx.supabase
     .from('whatsapp_config')
     .select('*')
-    .eq('account_id', accountId)
+    .eq(scope.column, scope.value)
     .maybeSingle()
 
   if (!config) {
@@ -119,10 +109,6 @@ export async function GET() {
         wabaId: config.waba_id,
         accessToken,
       })
-      // Meta returns the apps subscribed to this WABA. If the list
-      // is non-empty, OUR app is in there (the access_token we used
-      // belongs to our app — Meta wouldn't return data for an app
-      // the token can't see). Treat any entry as success.
       checks.waba_subscribed_to_app = subs.length > 0
       if (!checks.waba_subscribed_to_app) {
         errors.push(

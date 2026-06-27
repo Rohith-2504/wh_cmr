@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { createStubSupabaseClient } from '@/lib/supabase/stub-client'
 
 // Singleton instance — one client shared across the whole browser session.
 // Creating multiple clients causes auth-lock contention ("Lock was released
@@ -13,31 +14,8 @@ export function createClient(): SupabaseClient {
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
   if (!url || !key) {
-    // Return a recursively chainable Proxy during build time to avoid crashes
-    // when environment variables are not populated.
-    const createProxy = (): any => {
-      const target = () => {};
-      return new Proxy(target, {
-        get(_, prop) {
-          if (prop === 'then') return undefined;
-          if (prop === 'auth') {
-            return new Proxy({}, {
-              get(_, authProp) {
-                if (authProp === 'onAuthStateChange') {
-                  return () => ({ data: { subscription: { unsubscribe: () => {} } } });
-                }
-                return () => Promise.resolve({ data: {}, error: null });
-              }
-            });
-          }
-          return createProxy();
-        },
-        apply() {
-          return createProxy();
-        }
-      });
-    };
-    return createProxy();
+    browserClient = createStubSupabaseClient()
+    return browserClient
   }
 
   browserClient = createBrowserClient(url, key)

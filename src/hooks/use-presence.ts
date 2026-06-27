@@ -5,6 +5,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { isMissingSchemaResourceError } from "@/lib/auth/profile-load";
 import {
   derivePresence,
   type PresenceRow,
@@ -120,7 +121,17 @@ export function usePresence(enabled = true): UsePresenceResult {
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          console.error("[usePresence] initial fetch error:", error.message);
+          // Non-fatal: presence is best-effort. Missing table (pre-migration)
+          // should warn once — console.error trips the Next.js dev overlay.
+          if (isMissingSchemaResourceError(error)) {
+            console.warn(
+              "[usePresence] member_presence unavailable (migration not applied):",
+              error.message,
+            );
+            supabase.removeChannel(channel);
+            return;
+          }
+          console.warn("[usePresence] initial fetch error:", error.message);
           return;
         }
         setRows((prev) => {

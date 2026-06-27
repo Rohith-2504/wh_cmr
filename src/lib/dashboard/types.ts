@@ -35,8 +35,8 @@ export interface PipelineDonutData {
 }
 
 export interface ResponseTimeBucket {
-  /** 0 = Mon … 6 = Sun (Monday-first). */
-  dow: number
+  /** YYYY-MM-DD local calendar day. */
+  day: string
   /** Average first-response time in minutes. Null means no samples. */
   avgMinutes: number | null
   samples: number

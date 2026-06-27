@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { isMissingSchemaResourceError } from "@/lib/auth/profile-load";
 import { HEARTBEAT_MS, IDLE_AFTER_MS, type StoredPresence } from "@/lib/presence";
 
 /**
@@ -35,6 +36,7 @@ export function PresenceHeartbeat() {
 
     const supabase = createClient();
     let cancelled = false;
+    let disabled = false;
     let lastBeatAt = 0;
     lastActivityRef.current = Date.now();
 
@@ -49,7 +51,7 @@ export function PresenceHeartbeat() {
     };
 
     const beat = async () => {
-      if (cancelled) return;
+      if (cancelled || disabled) return;
       // Coalesce bursts: a tab refocus fires visibilitychange AND focus
       // together, so skip a beat within 1s of the last to avoid two RPCs
       // in the same frame. The 30s interval is never affected.
@@ -60,9 +62,17 @@ export function PresenceHeartbeat() {
         p_status: currentStatus(),
       });
       if (error && !cancelled) {
-        // Non-fatal: presence is best-effort. Log once per failure so a
-        // misconfigured RPC is visible without spamming.
-        console.error("[PresenceHeartbeat] touch_presence failed:", error.message);
+        // Non-fatal: presence is best-effort. Missing RPC/table (pre-migration)
+        // should warn once — console.error trips the Next.js dev overlay.
+        if (isMissingSchemaResourceError(error)) {
+          disabled = true;
+          console.warn(
+            "[PresenceHeartbeat] touch_presence unavailable (migration not applied):",
+            error.message,
+          );
+          return;
+        }
+        console.warn("[PresenceHeartbeat] touch_presence failed:", error.message);
       }
     };
 

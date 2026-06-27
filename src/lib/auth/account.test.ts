@@ -21,9 +21,12 @@ interface BuilderCall {
 function makeClient(opts: {
   user: { id: string } | null;
   userErr?: unknown;
-  byTable: Record<string, { data: unknown; error: unknown }>;
+  /** First profiles SELECT result; optional second for legacy retry. */
+  profilesResults?: { data: unknown; error: unknown }[];
+  byTable?: Record<string, { data: unknown; error: unknown }>;
 }) {
   const calls: BuilderCall[] = [];
+  let profilesCallCount = 0;
 
   const from = (table: string) => {
     const call: BuilderCall = { table, eqArgs: [] };
@@ -38,8 +41,15 @@ function makeClient(opts: {
         return builder;
       },
       maybeSingle() {
+        if (table === "profiles" && opts.profilesResults) {
+          const result =
+            opts.profilesResults[profilesCallCount] ??
+            opts.profilesResults[opts.profilesResults.length - 1];
+          profilesCallCount += 1;
+          return Promise.resolve(result);
+        }
         return Promise.resolve(
-          opts.byTable[table] ?? { data: null, error: null },
+          opts.byTable?.[table] ?? { data: null, error: null },
         );
       },
     };
@@ -95,6 +105,7 @@ describe("getCurrentAccount", () => {
       accountId: "acct-1",
       role: "owner",
       account: { id: "acct-1", name: "Acme" },
+      legacyAccountSharing: false,
     });
 
     // Two queries: profiles by user_id, then accounts by id. Neither
@@ -155,6 +166,38 @@ describe("getCurrentAccount", () => {
     await expect(getCurrentAccount()).rejects.toThrow(
       "Profile is not linked to an account",
     );
+  });
+
+  it("falls back to legacy profile columns when account_id is missing", async () => {
+    const { client, calls } = makeClient({
+      user: { id: "user-1" },
+      profilesResults: [
+        {
+          data: null,
+          error: {
+            code: "42703",
+            message: "column profiles.account_id does not exist",
+          },
+        },
+        {
+          data: { full_name: "User ADMIN", role: "admin" },
+          error: null,
+        },
+      ],
+    });
+    createClient.mockReturnValue(client);
+
+    const ctx = await getCurrentAccount();
+
+    expect(ctx).toMatchObject({
+      userId: "user-1",
+      accountId: "user-1",
+      role: "admin",
+      account: { id: "user-1", name: "User ADMIN" },
+      legacyAccountSharing: true,
+    });
+    expect(calls.filter((c) => c.table === "profiles")).toHaveLength(2);
+    expect(calls.map((c) => c.table)).not.toContain("accounts");
   });
 
   it("rejects an account_id that resolves to no readable account", async () => {

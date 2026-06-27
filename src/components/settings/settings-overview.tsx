@@ -35,7 +35,7 @@ export function SettingsOverview({
 }: {
   onSelect: (section: SettingsSection) => void;
 }) {
-  const { user, profile, accountId, accountRole, defaultCurrency, canManageMembers } =
+  const { user, profile, accountId, accountRole, defaultCurrency, canManageMembers, legacyAccountSharing } =
     useAuth();
   const { mode, theme } = useTheme();
 
@@ -116,11 +116,13 @@ export function SettingsOverview({
     // WhatsApp connection status — slower, independent.
     (async () => {
       setWhatsappLoading(true);
+      const scopeColumn = legacyAccountSharing ? 'user_id' : 'account_id';
+      const scopeValue = legacyAccountSharing ? userId : acctId;
       const [row, health] = await Promise.allSettled([
         supabase
           .from('whatsapp_config')
           .select('phone_number_id')
-          .eq('account_id', acctId)
+          .eq(scopeColumn, scopeValue)
           .maybeSingle(),
         fetch('/api/whatsapp/config', { cache: 'no-store' }).then((r) => r.json()),
       ]);
@@ -135,7 +137,7 @@ export function SettingsOverview({
     return () => {
       cancelled = true;
     };
-  }, [user, accountId, canManageMembers]);
+  }, [user, accountId, canManageMembers, legacyAccountSharing]);
 
   const displayName = profile?.full_name || profile?.email || 'Your account';
   const initial = (profile?.full_name || profile?.email || 'U').charAt(0).toUpperCase();

@@ -217,6 +217,104 @@ html[data-theme="rose"] {
   --sidebar-ring: oklch(0.645 0.22 16);
 }
 
+html[data-theme="teal"] {
+  --primary: oklch(0.62 0.14 195);
+  --primary-foreground: oklch(0.12 0.02 195);
+  --primary-hover: oklch(0.68 0.13 195);
+  --primary-soft: oklch(0.62 0.14 195 / 0.12);
+  --primary-soft-2: oklch(0.62 0.14 195 / 0.22);
+  --ring: oklch(0.62 0.14 195);
+  --chart-1: oklch(0.62 0.14 195);
+  --chart-2: oklch(0.7 0.12 170);
+  --sidebar-primary: oklch(0.62 0.14 195);
+  --sidebar-primary-foreground: oklch(0.12 0.02 195);
+  --sidebar-ring: oklch(0.62 0.14 195);
+}
+
+html[data-theme="indigo"] {
+  --primary: oklch(0.55 0.22 262);
+  --primary-foreground: oklch(0.985 0 0);
+  --primary-hover: oklch(0.62 0.2 262);
+  --primary-soft: oklch(0.55 0.22 262 / 0.12);
+  --primary-soft-2: oklch(0.55 0.22 262 / 0.22);
+  --ring: oklch(0.55 0.22 262);
+  --chart-1: oklch(0.55 0.22 262);
+  --chart-2: oklch(0.65 0.18 285);
+  --sidebar-primary: oklch(0.55 0.22 262);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-ring: oklch(0.55 0.22 262);
+}
+
+html[data-theme="cyan"] {
+  --primary: oklch(0.72 0.18 220);
+  --primary-foreground: oklch(0.1 0.02 220);
+  --primary-hover: oklch(0.78 0.16 220);
+  --primary-soft: oklch(0.72 0.18 220 / 0.12);
+  --primary-soft-2: oklch(0.72 0.18 220 / 0.22);
+  --ring: oklch(0.72 0.18 220);
+  --chart-1: oklch(0.72 0.18 220);
+  --chart-2: oklch(0.65 0.15 195);
+  --sidebar-primary: oklch(0.72 0.18 220);
+  --sidebar-primary-foreground: oklch(0.1 0.02 220);
+  --sidebar-ring: oklch(0.72 0.18 220);
+}
+
+html[data-theme="lime"] {
+  --primary: oklch(0.77 0.2 128);
+  --primary-foreground: oklch(0.14 0.04 128);
+  --primary-hover: oklch(0.82 0.18 128);
+  --primary-soft: oklch(0.77 0.2 128 / 0.12);
+  --primary-soft-2: oklch(0.77 0.2 128 / 0.22);
+  --ring: oklch(0.77 0.2 128);
+  --chart-1: oklch(0.77 0.2 128);
+  --chart-2: oklch(0.7 0.17 100);
+  --sidebar-primary: oklch(0.77 0.2 128);
+  --sidebar-primary-foreground: oklch(0.14 0.04 128);
+  --sidebar-ring: oklch(0.77 0.2 128);
+}
+
+html[data-theme="orange"] {
+  --primary: oklch(0.72 0.19 50);
+  --primary-foreground: oklch(0.14 0.03 50);
+  --primary-hover: oklch(0.78 0.17 50);
+  --primary-soft: oklch(0.72 0.19 50 / 0.12);
+  --primary-soft-2: oklch(0.72 0.19 50 / 0.22);
+  --ring: oklch(0.72 0.19 50);
+  --chart-1: oklch(0.72 0.19 50);
+  --chart-2: oklch(0.7 0.18 35);
+  --sidebar-primary: oklch(0.72 0.19 50);
+  --sidebar-primary-foreground: oklch(0.14 0.03 50);
+  --sidebar-ring: oklch(0.72 0.19 50);
+}
+
+html[data-theme="pink"] {
+  --primary: oklch(0.68 0.22 340);
+  --primary-foreground: oklch(0.985 0 0);
+  --primary-hover: oklch(0.74 0.2 340);
+  --primary-soft: oklch(0.68 0.22 340 / 0.12);
+  --primary-soft-2: oklch(0.68 0.22 340 / 0.22);
+  --ring: oklch(0.68 0.22 340);
+  --chart-1: oklch(0.68 0.22 340);
+  --chart-2: oklch(0.65 0.2 16);
+  --sidebar-primary: oklch(0.68 0.22 340);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-ring: oklch(0.68 0.22 340);
+}
+
+html[data-theme="slate"] {
+  --primary: oklch(0.56 0.07 240);
+  --primary-foreground: oklch(0.985 0 0);
+  --primary-hover: oklch(0.63 0.065 240);
+  --primary-soft: oklch(0.56 0.07 240 / 0.12);
+  --primary-soft-2: oklch(0.56 0.07 240 / 0.22);
+  --ring: oklch(0.56 0.07 240);
+  --chart-1: oklch(0.56 0.07 240);
+  --chart-2: oklch(0.65 0.06 260);
+  --sidebar-primary: oklch(0.56 0.07 240);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-ring: oklch(0.56 0.07 240);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -227,4 +325,281 @@ html[data-theme="rose"] {
   html {
     @apply font-sans;
   }
+}
+
+/* ── Invisible scrollbars ──────────────────────────────────── */
+/* Keep scroll functionality but hide the visual scrollbar track */
+@layer utilities {
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Apply invisible scrollbar globally to all scrollable areas */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+*:hover::-webkit-scrollbar-thumb {
+  background: hsl(var(--border) / 0.6);
+}
+
+/* ============================================================
+ * WhatsApp Web inbox theme — scoped to `.inbox-wa` so the rest
+ * of the CRM keeps its accent/mode tokens untouched.
+ * ============================================================ */
+
+.inbox-wa {
+  --wa-green: #00a884;
+  --wa-green-hover: #008069;
+  --wa-green-light: #25d366;
+  --wa-bg: #f0f2f5;
+  --wa-panel: #ffffff;
+  --wa-header: #f0f2f5;
+  --wa-border: #e9edef;
+  --wa-text: #111b21;
+  --wa-text-muted: #667781;
+  --wa-chat-bg: #efeae2;
+  --wa-chat-doodle: url("/inbox-doodle-light.svg");
+  --wa-bubble-out: #d9fdd3;
+  --wa-bubble-in: #ffffff;
+  --wa-bubble-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  --wa-search-bg: #f0f2f5;
+  --wa-active-row: #f0f2f5;
+  --wa-hover-row: #f5f6f6;
+  --wa-composer-bg: #f0f2f5;
+  --wa-composer-input: #ffffff;
+  --wa-date-pill: rgba(255, 255, 255, 0.95);
+  --wa-read-tick: #53bdeb;
+  --wa-banner-bg: #fdf4c5;
+  --wa-banner-text: #54656f;
+  background-color: var(--wa-bg);
+  color: var(--wa-text);
+}
+
+html[data-mode="dark"] .inbox-wa {
+  --wa-green: #00a884;
+  --wa-green-hover: #06cf9c;
+  --wa-green-light: #25d366;
+  --wa-bg: #111b21;
+  --wa-panel: #111b21;
+  --wa-header: #202c33;
+  --wa-border: #2a3942;
+  --wa-text: #e9edef;
+  --wa-text-muted: #8696a0;
+  --wa-chat-bg: #0b141a;
+  --wa-chat-doodle: url("/inbox-doodle.svg");
+  --wa-bubble-out: #005c4b;
+  --wa-bubble-in: #202c33;
+  --wa-bubble-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.4);
+  --wa-search-bg: #202c33;
+  --wa-active-row: #2a3942;
+  --wa-hover-row: #2a3942;
+  --wa-composer-bg: #202c33;
+  --wa-composer-input: #2a3942;
+  --wa-date-pill: rgba(42, 57, 66, 0.95);
+  --wa-read-tick: #53bdeb;
+  --wa-banner-bg: #182229;
+  --wa-banner-text: #8696a0;
+  background-color: var(--wa-bg);
+}
+
+.inbox-wa .wa-panel {
+  background-color: var(--wa-panel);
+}
+
+.inbox-wa .wa-header {
+  background-color: var(--wa-header);
+  border-color: var(--wa-border);
+}
+
+.inbox-wa .wa-border {
+  border-color: var(--wa-border);
+}
+
+.inbox-wa .wa-text-muted {
+  color: var(--wa-text-muted);
+}
+
+.inbox-wa .wa-chat-bg {
+  background-color: var(--wa-chat-bg);
+  background-image: var(--wa-chat-doodle);
+  background-repeat: repeat;
+}
+
+.inbox-wa .wa-search {
+  background-color: var(--wa-search-bg);
+  color: var(--wa-text);
+}
+
+.inbox-wa .wa-search::placeholder {
+  color: var(--wa-text-muted);
+}
+
+.inbox-wa .wa-row-active {
+  background-color: var(--wa-active-row);
+}
+
+.inbox-wa .wa-row-hover:hover {
+  background-color: var(--wa-hover-row);
+}
+
+.inbox-wa .wa-bubble-out {
+  background-color: var(--wa-bubble-out);
+  box-shadow: var(--wa-bubble-shadow);
+  color: var(--wa-text);
+}
+
+.inbox-wa .wa-bubble-in {
+  background-color: var(--wa-bubble-in);
+  box-shadow: var(--wa-bubble-shadow);
+  color: var(--wa-text);
+}
+
+.inbox-wa .wa-composer {
+  background-color: var(--wa-composer-bg);
+  border-color: var(--wa-border);
+}
+
+.inbox-wa .wa-composer-input {
+  background-color: var(--wa-composer-input);
+  color: var(--wa-text);
+}
+
+.inbox-wa .wa-composer-input::placeholder {
+  color: var(--wa-text-muted);
+}
+
+.inbox-wa .wa-green {
+  color: var(--wa-green);
+}
+
+.inbox-wa .wa-green-bg {
+  background-color: var(--wa-green);
+}
+
+.inbox-wa .wa-green-bg:hover {
+  background-color: var(--wa-green-hover);
+}
+
+.inbox-wa .wa-unread-badge {
+  background-color: var(--wa-green-light);
+  color: #ffffff;
+}
+
+.inbox-wa .wa-date-pill {
+  background-color: var(--wa-date-pill);
+  color: var(--wa-text-muted);
+  box-shadow: var(--wa-bubble-shadow);
+}
+
+.inbox-wa .wa-read-tick {
+  color: var(--wa-read-tick);
+}
+
+.inbox-wa .wa-filter-active {
+  background-color: var(--wa-green);
+  color: #111b21;
+}
+
+html[data-mode="dark"] .inbox-wa .wa-filter-active {
+  color: #111b21;
+}
+
+.inbox-wa .wa-filter-inactive {
+  background-color: var(--wa-search-bg);
+  color: var(--wa-text-muted);
+}
+
+.inbox-wa .wa-filter-inactive:hover {
+  background-color: var(--wa-hover-row);
+  color: var(--wa-text);
+}
+
+.inbox-wa .wa-filter-trigger {
+  cursor: pointer;
+  min-width: 4.75rem;
+}
+
+.inbox-wa .wa-filter-popover,
+.inbox-wa.wa-filter-popover {
+  background-color: var(--wa-panel);
+  color: var(--wa-text);
+  border: 1px solid var(--wa-border);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-color: transparent;
+}
+
+.inbox-wa .wa-filter-option:hover {
+  background-color: var(--wa-hover-row);
+}
+
+.inbox-wa .wa-tag-chip {
+  transition: opacity 0.15s ease;
+}
+
+.inbox-wa .wa-tag-chip:hover {
+  opacity: 0.85;
+}
+
+.inbox-wa .wa-banner {
+  background-color: var(--wa-banner-bg);
+  border-color: var(--wa-border);
+  color: var(--wa-banner-text);
+}
+
+/* ---- Claymorphism surfaces ---- */
+
+.clay-card {
+  background: linear-gradient(
+    165deg,
+    color-mix(in oklch, var(--card) 92%, white 8%) 0%,
+    var(--card) 45%,
+    color-mix(in oklch, var(--card) 88%, var(--background) 12%) 100%
+  );
+  border: 1px solid color-mix(in oklch, var(--border) 65%, transparent);
+  box-shadow:
+    0 24px 48px -12px color-mix(in oklch, var(--background) 30%, black 70% / 0.4),
+    0 12px 24px -8px color-mix(in oklch, var(--background) 40%, black 60% / 0.22),
+    inset 1px 1px 2px color-mix(in oklch, white 14%, transparent),
+    inset 2px 2px 10px color-mix(in oklch, white 7%, transparent),
+    inset -1px -2px 6px color-mix(in oklch, black 14%, transparent),
+    inset -2px -4px 14px color-mix(in oklch, var(--background) 75%, black 25% / 0.1);
+}
+
+html[data-mode="light"] .clay-card {
+  background: linear-gradient(
+    165deg,
+    color-mix(in oklch, var(--card) 96%, white 4%) 0%,
+    var(--card) 50%,
+    color-mix(in oklch, var(--card) 92%, var(--muted) 8%) 100%
+  );
+  box-shadow:
+    0 24px 48px -12px rgb(0 0 0 / 0.1),
+    0 12px 24px -8px rgb(0 0 0 / 0.06),
+    inset 1px 1px 0 color-mix(in oklch, white 85%, transparent),
+    inset 2px 2px 10px color-mix(in oklch, white 45%, transparent),
+    inset -1px -2px 4px color-mix(in oklch, black 5%, transparent);
+}
+
+[data-slot="dialog-overlay"]:has(+ [data-clay-modal-content]) {
+  background-color: color-mix(in oklch, var(--background) 60%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }

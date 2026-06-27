@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { cn } from "@/lib/utils";
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
   Phone,
   Mail,
   Copy,
   Check,
-  User,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
@@ -18,7 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { format } from "date-fns";
+import { formatDateNote } from "@/lib/dashboard/date-utils";
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -117,8 +116,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
-        <p className="text-sm text-muted-foreground">Select a conversation</p>
+      <div className="wa-panel flex h-full w-70 items-center justify-center border-l wa-border">
+        <p className="text-sm wa-text-muted">Select a conversation</p>
       </div>
     );
   }
@@ -127,27 +126,30 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-card">
+    <div className="wa-panel flex h-full w-70 flex-col border-l wa-border">
       <ScrollArea className="flex-1">
         <div className="p-4">
           {/* Contact Info */}
           <div className="flex flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--wa-search-bg)] text-lg font-semibold">
               {contact.avatar_url ? (
-                <img
+                <Image
                   src={contact.avatar_url}
                   alt={displayName}
+                  width={64}
+                  height={64}
+                  unoptimized
                   className="h-16 w-16 rounded-full object-cover"
                 />
               ) : (
                 initials
               )}
             </div>
-            <h3 className="mt-3 text-sm font-semibold text-foreground">
+            <h3 className="mt-3 text-sm font-semibold">
               {displayName}
             </h3>
             {contact.company && (
-              <p className="text-xs text-muted-foreground">{contact.company}</p>
+              <p className="text-xs wa-text-muted">{contact.company}</p>
             )}
           </div>
 
@@ -285,7 +287,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                       {note.note_text}
                     </p>
                     <p className="mt-1 text-[10px] text-muted-foreground">
-                      {format(new Date(note.created_at), "MMM d, yyyy HH:mm")}
+                      {formatDateNote(note.created_at)}
                     </p>
                   </div>
                 ))}

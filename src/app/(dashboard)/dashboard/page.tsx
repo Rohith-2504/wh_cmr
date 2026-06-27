@@ -31,7 +31,7 @@ import { SkeletonCard } from '@/components/dashboard/skeleton'
 import { QuickActions } from '@/components/dashboard/quick-actions'
 import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
-import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
+import { ResponseTimeChart, type ResponseTimeRangeDays } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 
 type RangeDays = 7 | 30 | 90
@@ -55,7 +55,14 @@ export default function DashboardPage() {
   const [pipeline, setPipeline] = useState<PipelineDonutData | null>(null)
   const [pipelineLoading, setPipelineLoading] = useState(true)
 
-  const [responseTime, setResponseTime] = useState<ResponseTimeSummary | null>(null)
+  const [responseTimeRange, setResponseTimeRange] = useState<ResponseTimeRangeDays>(7)
+  const [responseTime, setResponseTime] = useState<
+    Record<ResponseTimeRangeDays, ResponseTimeSummary | null>
+  >({
+    1: null,
+    7: null,
+    30: null,
+  })
   const [responseTimeLoading, setResponseTimeLoading] = useState(true)
 
   const [activity, setActivity] = useState<ActivityItem[] | null>(null)
@@ -82,8 +89,8 @@ export default function DashboardPage() {
       .catch((err) => console.error('[dashboard] pipeline failed:', err))
       .finally(() => setPipelineLoading(false))
 
-    void loadResponseTime(db)
-      .then((r) => setResponseTime(r))
+    void loadResponseTime(db, 7)
+      .then((r) => setResponseTime((prev) => ({ ...prev, 7: r })))
       .catch((err) => console.error('[dashboard] response time failed:', err))
       .finally(() => setResponseTimeLoading(false))
 
@@ -118,8 +125,22 @@ export default function DashboardPage() {
     [series],
   )
 
+  const handleResponseTimeRangeChange = useCallback(
+    (r: ResponseTimeRangeDays) => {
+      setResponseTimeRange(r)
+      if (responseTime[r] !== null) return
+      setResponseTimeLoading(true)
+      const db = createClient()
+      loadResponseTime(db, r)
+        .then((data) => setResponseTime((prev) => ({ ...prev, [r]: data })))
+        .catch((err) => console.error('[dashboard] response time failed:', err))
+        .finally(() => setResponseTimeLoading(false))
+    },
+    [responseTime],
+  )
+
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
@@ -182,15 +203,13 @@ export default function DashboardPage() {
       {/* Quick actions */}
       <QuickActions />
 
-      {/* Charts row */}
-      {/* items-stretch (the grid default) stretches the two columns to
-          match the tallest sibling; adding h-full on each wrapper and
-          on the inner panels makes both cards actually fill that
-          stretched height so their rounded borders line up. Without
-          this, the pipeline card rendered at its natural (shorter)
-          height while the line chart drove the row height. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="h-full lg:col-span-3">
+      {/* Charts row — fills remaining viewport so the response-time
+          table below is only visible on scroll. */}
+      <div
+        className="grid min-h-0 grid-cols-1 gap-4 lg:grid-cols-5"
+        style={{ minHeight: 'calc(100vh - 340px)' }}
+      >
+        <div className="flex h-full min-h-0 flex-col lg:col-span-3">
           <ConversationsChart
             series={series}
             loading={seriesLoading}
@@ -198,7 +217,7 @@ export default function DashboardPage() {
             onRangeChange={handleRangeChange}
           />
         </div>
-        <div className="h-full lg:col-span-2">
+        <div className="flex h-full min-h-0 flex-col lg:col-span-2">
           <PipelineDonut
             data={pipeline}
             loading={pipelineLoading}
@@ -207,8 +226,15 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Response time */}
-      <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
+      {/* Response time — visible on scroll */}
+      <div className="flex flex-col">
+        <ResponseTimeChart
+          series={responseTime}
+          loading={responseTimeLoading}
+          range={responseTimeRange}
+          onRangeChange={handleResponseTimeRangeChange}
+        />
+      </div>
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />

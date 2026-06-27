@@ -43,6 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { usePresence } from '@/hooks/use-presence';
 import type { AccountRole } from '@/lib/auth/roles';
 import { presenceLabel, summarize } from '@/lib/presence';
+import { formatDateMedium } from '@/lib/dashboard/date-utils';
 import {
   PRESENCE_DOT_CLASS,
   PresenceDot,
@@ -106,13 +108,7 @@ const EDITABLE_ROLES: { value: AccountRole; label: string; hint: string }[] = [
 // primary (admin) → muted (agent / viewer).
 
 function fmtDate(iso: string): string {
-  // Match the rest of the dashboard's locale-light formatting.
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  return formatDateMedium(iso);
 }
 
 function fmtExpiresIn(iso: string): string {
@@ -125,12 +121,13 @@ function fmtExpiresIn(iso: string): string {
 }
 
 export function MembersTab() {
-  const { user, canManageMembers } = useAuth();
+  const { user, canManageMembers, profileLoading } = useAuth();
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
@@ -139,6 +136,7 @@ export function MembersTab() {
   );
 
   const loadEverything = useCallback(async () => {
+    setLoadError(null);
     try {
       const [mres, ires] = await Promise.all([
         fetch('/api/account/members', { cache: 'no-store' }),
@@ -149,7 +147,9 @@ export function MembersTab() {
 
       if (!mres.ok) {
         const payload = await mres.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to load members');
+        const message = payload.error || 'Failed to load members';
+        setLoadError(message);
+        toast.error(message);
         return;
       }
       const mdata = (await mres.json()) as { members: Member[] };
@@ -168,6 +168,7 @@ export function MembersTab() {
       }
     } catch (err) {
       console.error('[MembersTab] load error:', err);
+      setLoadError('Could not reach the server');
       toast.error('Could not reach the server');
     } finally {
       setLoading(false);
@@ -175,8 +176,10 @@ export function MembersTab() {
   }, [canManageMembers]);
 
   useEffect(() => {
+    if (profileLoading) return;
+    setLoading(true);
     void loadEverything();
-  }, [loadEverything]);
+  }, [loadEverything, profileLoading]);
 
   async function handleRoleChange(member: Member, nextRole: AccountRole) {
     if (member.role === nextRole) return;
@@ -270,7 +273,7 @@ export function MembersTab() {
     }
   }
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-6 animate-spin text-primary" />
@@ -319,9 +322,39 @@ export function MembersTab() {
           );
         })()}
 
+      {loadError ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+            <AlertTriangle className="size-6 text-amber-400" />
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+            <Button variant="outline" onClick={() => void loadEverything()}>
+              Try again
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* Roster */}
       <Card>
         <CardContent className="p-0">
+          {members.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+              <UsersRound className="size-6 text-muted-foreground" />
+              <p className="text-sm font-medium text-foreground">No team members yet</p>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                {canManageMembers
+                  ? 'Invite teammates to share access to this account.'
+                  : 'Your account roster will appear here once members are added.'}
+              </p>
+              {canManageMembers ? (
+                <Button className="mt-2" onClick={() => setInviteOpen(true)}>
+                  <Plus className="size-4" />
+                  Invite member
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+          <TooltipProvider delay={200}>
           <ul className="divide-y divide-border">
             {members.map((member) => {
               const roleMeta = ROLE_META[member.role];
@@ -468,6 +501,8 @@ export function MembersTab() {
               );
             })}
           </ul>
+          </TooltipProvider>
+          )}
         </CardContent>
       </Card>
 
