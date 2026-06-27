@@ -505,7 +505,7 @@ export function MembersTab() {
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Click <span className="text-muted-foreground">Invite member</span>{' '}
-                  above to generate a shareable link.
+                  above to send an email invitation.
                 </p>
               </CardContent>
             </Card>

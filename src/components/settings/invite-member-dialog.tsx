@@ -74,6 +74,8 @@ interface CreatedInvite {
   /** Snapshotted at creation time so a later account rename can't
    *  retroactively change the wa.me message text on the result step. */
   accountName: string;
+  email: string;
+  emailSent: boolean;
 }
 
 export function InviteMemberDialog({
@@ -84,28 +86,22 @@ export function InviteMemberDialog({
   const { account } = useAuth();
   const [role, setRole] = useState<InviteRole>('agent');
   const [expiry, setExpiry] = useState<string>('7');
-  const [label, setLabel] = useState('');
+  const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreatedInvite | null>(null);
 
   function reset() {
     setRole('agent');
     setExpiry('7');
-    setLabel('');
+    setEmail('');
     setResult(null);
     setSubmitting(false);
   }
 
   async function handleCreate() {
-    // Mirror the server's max-length check so we don't ship an
-    // obviously-too-long label across the wire just to bounce off
-    // a 400. The Input also has a `maxLength={MAX_LABEL_LEN}` cap
-    // but a paste can land an over-limit string into state before
-    // the limit kicks in on the next keystroke — this is the safety
-    // net for that path.
-    const trimmedLabel = label.trim();
-    if (trimmedLabel.length > MAX_LABEL_LEN) {
-      toast.error(`Label must be ${MAX_LABEL_LEN} characters or fewer`);
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      toast.error('Please enter a valid email address');
       return;
     }
     setSubmitting(true);
@@ -116,7 +112,7 @@ export function InviteMemberDialog({
         body: JSON.stringify({
           role,
           expiresInDays: Number(expiry),
-          label: trimmedLabel || undefined,
+          email: trimmedEmail,
         }),
       });
 
@@ -129,6 +125,7 @@ export function InviteMemberDialog({
       const data = (await res.json()) as {
         url: string;
         expiresInDays: number;
+        emailSent: boolean;
       };
 
       setResult({
@@ -141,6 +138,8 @@ export function InviteMemberDialog({
         // — the dialog requires admin+ which requires a loaded
         // profile — but stay safe).
         accountName: account?.name ?? 'our wacrm account',
+        email: trimmedEmail,
+        emailSent: data.emailSent,
       });
       onCreated();
     } catch (err) {
@@ -191,22 +190,31 @@ export function InviteMemberDialog({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-popover-foreground">
                 <Sparkles className="size-4 text-primary" />
-                Invite created
+                {result.emailSent ? 'Invitation sent' : 'Invite created'}
               </DialogTitle>
               <DialogDescription className="text-muted-foreground">
-                Share this link with your new teammate. They&apos;ll be able
-                to sign up (or sign in) and join the account as{' '}
-                <span className="font-medium text-muted-foreground">{result.role}</span>
-                . The link is valid for{' '}
-                <span className="font-medium text-muted-foreground">
-                  {result.expiresInDays} day{result.expiresInDays === 1 ? '' : 's'}
-                </span>
-                .
+                {result.emailSent ? (
+                  <>
+                    An invitation email has been sent to{' '}
+                    <strong className="text-foreground">{result.email}</strong>. They can follow the link to set their password and join your team as{' '}
+                    <span className="font-semibold text-muted-foreground">{result.role}</span>.
+                  </>
+                ) : (
+                  <>
+                    Invite created for{' '}
+                    <strong className="text-foreground">{result.email}</strong>. They&apos;ll be able to join as{' '}
+                    <span className="font-semibold text-muted-foreground">{result.role}</span>.
+                  </>
+                )}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-3 py-2">
-              <Label className="text-muted-foreground">Invite link</Label>
+              <Label className="text-muted-foreground">
+                {result.emailSent
+                  ? 'Backup invite link'
+                  : 'Invite link'}
+              </Label>
               <div className="flex gap-2">
                 <Input
                   readOnly
@@ -224,25 +232,22 @@ export function InviteMemberDialog({
                 </Button>
               </div>
 
-              {/* Higher-contrast amber than the original 10% / amber-200.
-                  Reviewed against slate-900 to meet WCAG AAA for body
-                  text (target ratio 7:1). Border bumped to /50, bg to
-                  /15, foreground promoted to amber-100 for the strong
-                  intro, amber-200 for the body. */}
-              <div className="rounded-md border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200">
-                <strong className="font-semibold text-amber-100">
-                  Save this link now.
-                </strong>{' '}
-                We never store the plaintext — once you close this dialog
-                the URL is gone. To re-share, revoke this invite and create
-                a new one.
-              </div>
+              {result.emailSent ? (
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  The invite link is valid for{' '}
+                  <strong>{result.expiresInDays} days</strong>. If the email doesn&apos;t arrive in their inbox, please ask them to check their Spam folder or share this backup link directly.
+                </div>
+              ) : (
+                <div className="rounded-md border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-xs text-amber-200">
+                  <strong className="font-semibold text-amber-100">
+                    Save this link now.
+                  </strong>{' '}
+                  We never store the plaintext — once you close this dialog
+                  the URL is gone. To re-share, revoke this invite and create
+                  a new one.
+                </div>
+              )}
 
-              {/* Anchor styled with `buttonVariants` rather than wrapping
-                  in <Button asChild>. The wacrm Button is the Base UI
-                  ButtonPrimitive — it has no Radix-style asChild slot.
-                  Direct anchor preserves right-click "Open in new tab"
-                  behaviour too. */}
               <a
                 href={whatsappShareUrl(result.url)}
                 target="_blank"
@@ -272,12 +277,29 @@ export function InviteMemberDialog({
             <DialogHeader>
               <DialogTitle className="text-popover-foreground">Invite a teammate</DialogTitle>
               <DialogDescription className="text-muted-foreground">
-                Generate a one-time invite link. Share it via WhatsApp,
-                Slack, or any channel you like — no email service required.
+                Enter their email address to send an invitation email. They will receive a link to set their password and join your team.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label className="text-muted-foreground" htmlFor="invite-email">
+                  Email address
+                </Label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  placeholder="teammate@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  The invitation link will be sent directly to this address.
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Role</Label>
                 <Select
@@ -316,24 +338,6 @@ export function InviteMemberDialog({
                   </SelectContent>
                 </Select>
               </div>
-
-              <div className="space-y-2">
-                <Label className="text-muted-foreground">
-                  Label{' '}
-                  <span className="text-xs text-muted-foreground">(optional)</span>
-                </Label>
-                <Input
-                  placeholder="e.g. Sara — support team"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  maxLength={MAX_LABEL_LEN}
-                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Helps you remember who you sent the link to in the pending
-                  list below.
-                </p>
-              </div>
             </div>
 
             <DialogFooter className="bg-popover border-border">
@@ -352,10 +356,10 @@ export function InviteMemberDialog({
                 {submitting ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    Creating...
+                    Sending...
                   </>
                 ) : (
-                  'Generate link'
+                  'Send invitation'
                 )}
               </Button>
             </DialogFooter>

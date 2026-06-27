@@ -18,6 +18,7 @@
 // ============================================================
 
 import { NextResponse } from "next/server";
+import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import {
@@ -32,6 +33,17 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+
+let _adminClient: ReturnType<typeof createSupabaseAdminClient> | null = null;
+function supabaseAdmin() {
+  if (!_adminClient) {
+    _adminClient = createSupabaseAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _adminClient;
+}
 
 // Resolve the base URL we publish invite links under.
 //
@@ -179,7 +191,7 @@ export async function POST(request: Request) {
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown; expiresInDays?: unknown; label?: unknown }
+      | { role?: unknown; expiresInDays?: unknown; email?: unknown }
       | null;
 
     const role = body?.role;
@@ -193,6 +205,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const email = body?.email;
+    if (typeof email !== "string" || !email.includes("@")) {
+      return NextResponse.json(
+        { error: "A valid email address is required to invite a member" },
+        { status: 400 },
+      );
+    }
+
     const expiresInDaysRaw = body?.expiresInDays;
     // `clampExpiryDays` tolerates undefined / NaN / negatives by
     // collapsing to the safe default, so we just pass the raw
@@ -202,17 +222,7 @@ export async function POST(request: Request) {
     const expiryDays = clampExpiryDays(expiresInDays);
     const expiresAt = inviteExpiresAt(expiryDays);
 
-    let label: string | null = null;
-    if (typeof body?.label === "string") {
-      const trimmed = body.label.trim();
-      if (trimmed.length > MAX_LABEL_LEN) {
-        return NextResponse.json(
-          { error: `Label must be ${MAX_LABEL_LEN} characters or fewer` },
-          { status: 400 },
-        );
-      }
-      label = trimmed === "" ? null : trimmed;
-    }
+    const label = email.trim();
 
     const { token, hash } = generateInviteToken();
 
@@ -237,13 +247,29 @@ export async function POST(request: Request) {
       );
     }
 
+    let emailSent = false;
+    let emailErrorMsg: string | null = null;
+    try {
+      const { error: inviteError } = await supabaseAdmin().auth.admin.inviteUserByEmail(email.trim(), {
+        redirectTo: `${getBaseUrl(request)}/auth/callback?next=/join/${token}`
+      });
+      if (inviteError) {
+        emailErrorMsg = inviteError.message;
+      } else {
+        emailSent = true;
+      }
+    } catch (err: any) {
+      emailErrorMsg = err?.message || String(err);
+    }
+
     return NextResponse.json(
       {
         invitation: data,
-        // Plaintext payload — visible to the admin exactly once.
         token,
         url: inviteUrl(token, getBaseUrl(request)),
         expiresInDays: expiryDays,
+        emailSent,
+        emailError: emailErrorMsg
       },
       { status: 201 },
     );
