@@ -44,6 +44,36 @@ function SignupPageInner() {
   const [success, setSuccess] = useState(false);
   const supabase = createClient();
 
+  if (!inviteToken) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <Card className="w-full max-w-md border-border bg-card">
+          <CardHeader className="items-center text-center">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/10">
+              <UsersRound className="h-6 w-6 text-red-500" />
+            </div>
+            <CardTitle className="text-xl text-foreground">
+              Registration Closed
+            </CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Public registration is disabled. You can only create an account if you have received an invitation link from your administrator.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/login">
+              <Button
+                variant="outline"
+                className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Back to sign in
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);

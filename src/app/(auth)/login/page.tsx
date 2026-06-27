@@ -141,19 +141,17 @@ function LoginPageInner() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            Don&apos;t have an account?{" "}
-            <Link
-              href={
-                inviteToken
-                  ? `/signup?invite=${encodeURIComponent(inviteToken)}`
-                  : "/signup"
-              }
-              className="text-primary hover:text-primary/80"
-            >
-              Create account
-            </Link>
-          </p>
+          {inviteToken && (
+            <p className="mt-6 text-center text-sm text-muted-foreground">
+              Don&apos;t have an account?{" "}
+              <Link
+                href={`/signup?invite=${encodeURIComponent(inviteToken)}`}
+                className="text-primary hover:text-primary/80"
+              >
+                Create account
+              </Link>
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
