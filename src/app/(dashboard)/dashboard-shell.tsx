@@ -40,17 +40,20 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background p-3 lg:p-4">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background p-2.5 lg:p-3.5 gap-2.5 lg:gap-3.5">
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
-      <div className="flex flex-1 overflow-hidden bg-card rounded-[24px] border border-border/80 shadow-sm">
+      
+      {/* Separate Top Navbar */}
+      <Header onOpenSidebar={() => setSidebarOpen(true)} />
+      
+      {/* Bottom Layout Row: Sidebar + main content */}
+      <div className="flex flex-1 overflow-hidden gap-2.5 lg:gap-3.5">
         <Sidebar open={sidebarOpen} onClose={closeSidebar} />
-        <div className="flex flex-1 flex-col overflow-hidden bg-card">
-          <Header onOpenSidebar={() => setSidebarOpen(true)} />
-          {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
-          <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-muted/30">{children}</main>
-        </div>
+        <main className="flex-1 overflow-y-auto rounded-2xl border border-border/60 bg-card p-4 sm:p-6 shadow-sm">
+          {children}
+        </main>
       </div>
     </div>
   );

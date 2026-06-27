@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Settings as SettingsIcon, User, Search, Bell, HelpCircle, ChevronDown } from "lucide-react";
+import { LogOut, Menu, Settings as SettingsIcon, User, Search, Bell, HelpCircle, ChevronDown, MessageSquare } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -53,8 +53,24 @@ export function Header({ onOpenSidebar }: HeaderProps) {
     "U";
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border/40 bg-card px-4 lg:px-6">
-      <div className="flex min-w-0 items-center gap-2">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-4 rounded-2xl border border-border/60 bg-card px-4 shadow-sm">
+      {/* Brand logo & title - Desktop only */}
+      <div className="hidden lg:flex items-center gap-2 pr-2">
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <MessageSquare className="h-4 w-4" />
+          </div>
+          <span className="text-sm font-semibold text-foreground whitespace-nowrap">
+            ShowBusinezz CRM
+          </span>
+        </Link>
+      </div>
+
+      {/* Vertical Separator - Desktop only */}
+      <div className="hidden lg:block h-6 w-px bg-border/60" />
+
+      {/* Page Title & Hamburger - Mobile and Desktop */}
+      <div className="flex min-w-0 items-center gap-2 pl-0 lg:pl-2">
         {/* Hamburger — mobile only. 44×44 hit target per Apple HIG. */}
         <button
           type="button"
@@ -64,13 +80,13 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         >
           <Menu className="h-5 w-5" />
         </button>
-        <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
+        <h1 className="truncate text-sm font-semibold text-foreground sm:text-base">
           {title}
         </h1>
       </div>
 
       {/* Center Search Bar mimicking the mockup */}
-      <div className="hidden max-w-xs w-full md:flex items-center gap-2 rounded-full border border-border/70 bg-muted/40 px-3.5 py-1.5 text-muted-foreground transition-all hover:bg-muted/65 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
+      <div className="hidden max-w-xs w-full md:flex items-center gap-2 rounded-full border border-border/70 bg-muted/40 px-3.5 py-1.5 text-muted-foreground transition-all hover:bg-muted/65 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 mx-auto">
         <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
         <input
           type="text"
